@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=overlays-content">
+<meta name="apple-mobile-web-app-capable" content="yes"> 
+<script src="base_utils.js"></script>
+<script src="ColorPicker.js"></script>
+<script src="pixel_draw.js"></script>
+<script src="adafruit_gfx_emu/build/asm_gfx.js"></script>
+<script>
+
+const PX_WIDTH = 64
+const PX_HEIGHT = 32
+
+let clock_canvas =  null
+
+function page_onload()
+{
+    clock_canvas = new GfxCanvas(PX_WIDTH, PX_HEIGHT, 5, body, 0, "clock_canvas")
+    //draw_pixel_onload(body, PX_WIDTH, PX_HEIGHT)
+}
+
+
+
+function rt_start()
+{
+    Module.gfx_init_display(clock_canvas, PX_WIDTH, PX_HEIGHT)
+
+    clock_canvas.gfx.print_str_at(2, 10, "World")
+    clock_canvas.draw()
+}
+
+Module.onRuntimeInitialized = rt_start
+
+</script>
+<link rel="stylesheet" type="text/css" href="pixel_draw.css">
+
+</head>
+<body id="body" onload="page_onload()"></body>
+
+</html>

@@ -1,35 +1,16 @@
 "use strict";
 
-function create_elem(elem_type, cls) {
-    let e = document.createElement(elem_type);
-    if (cls !== undefined && cls !== null) {
-        if (!Array.isArray(cls))
-            cls = [cls]
-        e.classList = cls.join(" ")
-    }
-    return e
-}
-function add_elem(parent, elem_type, cls) {
-    let e = create_elem(elem_type, cls)
-    parent.appendChild(e)
-    return e
-}
+const DRAW_LINE_WIDTH = 2
+const DRAW_PIXEL_SIZE = 20
 
-class DrawState
+class DrawState extends GfxCanvas
 {
-    constructor(canvas, shadow_canvas)
+    constructor(parent_elem, canvas_name, w, h)
     {
-        this.LINE_WIDTH = 2
-        this.PIXEL_SIZE = 20
+        super(w, h, DRAW_PIXEL_SIZE, parent_elem, DRAW_LINE_WIDTH, canvas_name)
 
-        this.shadow_canvas = shadow_canvas
-        //this.shadow_canvas.style.imageRendering = "pixelated"
-        this.shadow_ctx = shadow_canvas.getContext('2d')
-        //this.shadow_ctx.imageSmoothingEnabled = false
-
-        this.canvas = canvas
-        //this.canvas.style.imageRendering = "pixelated"
-        this.ctx = canvas.getContext('2d')
+        this.LINE_WIDTH = DRAW_LINE_WIDTH
+        this.PIXEL_SIZE = DRAW_PIXEL_SIZE
 
         const l_tool_sz = localStorage['draw_cur_tool_sz']
         this.tool_radius = (l_tool_sz === undefined) ? 2 : parseFloat(l_tool_sz)
@@ -37,24 +18,6 @@ class DrawState
 
         this.tool_pradius = this.tool_radius * this.PIXEL_SIZE
         
-
-        this.width = 64
-        this.height = 32
-
-        this.shadow_canvas.width = this.width
-        this.shadow_canvas.height = this.height
-
-        this.canvas_width = this.width * this.PIXEL_SIZE + this.LINE_WIDTH
-        this.canvas_height = this.height * this.PIXEL_SIZE + this.LINE_WIDTH
-
-        this.canvas.width = this.canvas_width
-        this.canvas.height = this.canvas_height 
-
-        this.ctx.imageSmoothingEnabled = false
-
-        //this.pixels = new Uint8Array(this.width * this.height * 3)
-        this.image_data = this.shadow_ctx.getImageData(0, 0, this.width, this.height)
-        this.pixels = this.image_data.data
 
         //for(let i = 0; i < this.pixels.length; ++i)
         //    this.pixels[i] = 0
@@ -70,16 +33,6 @@ class DrawState
             this.setPixel(i, i, 255, 0, 0)
     }
 
-    setPixel(x, y, r, g, b)
-    {
-        if (x < 0 || y < 0 || x >= this.width || y >= this.height)
-            return
-        let i = (y * this.width + x)*4
-        this.pixels[i] = r
-        this.pixels[i+1] = g
-        this.pixels[i+2] = b
-        this.pixels[i+3] = 255;
-    }
 
     addPixel(x, y, r, g, b, a)
     {
@@ -100,12 +53,7 @@ class DrawState
 
     draw_cavnvas()
     {
-        this.ctx.fillStyle = '#000000'
-        this.ctx.fillRect(0, 0, this.canvas_width, this.canvas_height)
-        this.shadow_ctx.putImageData(this.image_data, 0, 0);
-
-        this.ctx.drawImage(this.shadow_canvas, 0, 0, this.canvas_width, this.canvas_height)
-        //return
+        this.draw()
 
         this.ctx.beginPath();
         for(let x = 1; x < this.canvas_width + 1; x += this.PIXEL_SIZE)
@@ -262,18 +210,12 @@ function connect_events(canvas, s)
 // TODO color picker dismiss on touch outside
 
 
-function draw_pixel_onload(root)
+function draw_pixel_onload(root, w, h)
 {
+    const top_elem = add_elem(root, 'div', 'draw_top')
+    const control_elem = add_elem(top_elem, 'div', 'draw_control')
 
-    const topElem = add_elem(root, 'div', 'draw_top')
-    const control_elem = add_elem(topElem, 'div', 'draw_control')
-
-    const canvas = add_elem(topElem, 'canvas', 'draw_canvas')
-    canvas.setAttribute('id', 'draw_canvas')
-    const shadow_canvas = add_elem(topElem, 'canvas', 'draw_shadow_canvas')
-    shadow_canvas.style.visibility = "hidden"
-
-    const s = new DrawState(canvas, shadow_canvas)
+    const s = new DrawState(top_elem, 'draw_canvas', w, h)
 
     const clear_but = add_elem(control_elem, 'div', 'button')
     clear_but.innerText = 'Clear'
@@ -294,5 +236,5 @@ function draw_pixel_onload(root)
     //s.test_pattern()
     s.draw_cavnvas()
 
-    connect_events(canvas, s)
+    connect_events(s.canvas, s)
 }
