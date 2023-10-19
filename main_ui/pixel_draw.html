@@ -15,9 +15,55 @@ const PX_HEIGHT = 32
 
 let clock_canvas =  null
 
+let running_id = 1
+function add_select(parent, label, values)
+{
+    const lbl = add_elem(parent, 'label', 'combo_label')
+    lbl.innerText = label
+    const sel = add_elem(parent, 'select', 'combo_sel')
+    const id = 'sel_' + running_id++;
+    sel.setAttribute('id', id)
+    lbl.setAttribute('for', id)
+    for(let v of values) {
+        const opt = add_elem(sel, 'option', 'combo_opt')
+        opt.setAttribute('value', v.value)
+        opt.innerText = v.text
+    }
+    return sel
+}
+
+function clock_onload()
+{
+    const clock = add_elem(body, 'div', 'clock_top')
+    const ctrl = add_elem(clock, 'div', 'clock_ctrl')
+    const disp = add_elem(clock, 'div', 'clock_disp')
+    clock_canvas = new GfxCanvas(PX_WIDTH, PX_HEIGHT, 5, disp, 0, "clock_canvas")
+    Module.gfx_init_display(clock_canvas, PX_WIDTH, PX_HEIGHT)
+
+    const font_strs = Module.gfx_get_fonts()
+    const font_opt = [{value:-1, text:'Default'}]
+    for(let i = 0; i < font_strs.size(); ++i)
+        font_opt.push({value:i, text:font_strs.get(i)})
+
+    const sel = add_select(ctrl, "Font:", font_opt)
+    const display = ()=>{
+        clock_canvas.gfx.set_font(parseInt(sel.value))
+        clock_canvas.gfx.print_str_at(0, 0, "MNM20:23:45")
+        clock_canvas.draw()
+    }
+    sel.addEventListener('change', ()=> {
+        clock_canvas.gfx.clear()
+        display()
+    })
+
+    clock_canvas.gfx.set_text_color(0, 128, 255)
+    display()
+
+}
+
 function page_onload()
 {
-    clock_canvas = new GfxCanvas(PX_WIDTH, PX_HEIGHT, 5, body, 0, "clock_canvas")
+    
     //draw_pixel_onload(body, PX_WIDTH, PX_HEIGHT)
 }
 
@@ -25,10 +71,9 @@ function page_onload()
 
 function rt_start()
 {
-    Module.gfx_init_display(clock_canvas, PX_WIDTH, PX_HEIGHT)
+    clock_onload()
+    
 
-    clock_canvas.gfx.print_str_at(2, 10, "World")
-    clock_canvas.draw()
 }
 
 Module.onRuntimeInitialized = rt_start
