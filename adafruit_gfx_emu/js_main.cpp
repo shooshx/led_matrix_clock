@@ -62,12 +62,18 @@ public:
         setFont(all_fonts[index].fontPtr);
     }
 
+    void set_back_col(int r, int g, int b)
+    {
+        m_backcol = color565(r, g, b);
+    }
+
     void clear()
     {
-        fillScreen(0);
+        fillScreen(m_backcol);
     }
 
 private:
+    uint16_t m_backcol = 0;
     emscripten::val m_canvas;
 };
 
@@ -109,6 +115,7 @@ EMSCRIPTEN_BINDINGS(my_module)
         .function("set_text_color", &JsDisplay::set_text_color)
         .function("set_font", &JsDisplay::set_font)
         .function("clear", &JsDisplay::clear)
+        .function("set_back_col", &JsDisplay::set_back_col)
         ;
     
 }

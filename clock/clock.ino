@@ -9,8 +9,9 @@
 #include <LittleFS.h>
 
 #include <PxMatrix.h>
-#include "my_fonts/helvetica_11.h"
-#include "my_fonts/diamond_12.h"
+
+#include "my_fonts/fonts_index.h"
+#include "ClockState.h"
 
 
 // Replace with your network credentials
@@ -29,9 +30,7 @@ String cur_time;
 unsigned long epochTime;
 int tzOffset = +3;
 
-const char * days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"} ;
-const char * months[] = {"Jan", "Feb", "Mar", "Apr", "May", "June", "July", "Aug", "Sep", "Oct", "Nov", "Dec"} ;
-const char * ampm[] = {"AM", "PM"}; 
+
 
 #define P_LAT 22
 #define P_A 19
@@ -44,6 +43,8 @@ hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
 PxMATRIX display(64,32,P_LAT, P_OE,P_A,P_B,P_C,P_D);
+
+ClockState clock_state;
 
 void setupPins()
 {
@@ -194,6 +195,7 @@ void setupDisplay()
   display.setTextColor(myCYAN);
   display.setCursor(2,0);
   display.print("Pixel");
+  display.setTextWrap(false);
 
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, &display_updater, true);
@@ -273,12 +275,12 @@ void printTime()
 
   timeToStrings();
 
-  display.setFont(&DiamondRegularRNormal12);
+  //display.setFont(&DiamondRegularRNormal12);
   display.setTextColor(myCYAN);
   display.setCursor(2,2);
   display.print(cur_time);
 
-  display.setFont(&HelveticaRegularRNormal11);
+  //display.setFont(&HelveticaRegularRNormal11);
   display.setTextColor(myRED);
   display.setCursor(2,16);
   display.print(cur_date);
@@ -292,7 +294,10 @@ void loop(void){
   
   if (timeChanged)
   {
-    printTime();
+    //printTime();
+    time_t utc = epochTime;
+    time_t local = utc + tzOffset * 3600;
+    clock_state.draw(local);
   }
 
   /*

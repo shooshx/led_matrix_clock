@@ -1,5 +1,74 @@
 body {
     user-select: none;
+    font-family: Verdana;
+}
+
+.combo_sel {
+    height: 25px;
+    border-radius: 4px;
+    margin-left: 5px;
+}
+
+.num_in_cont {
+    display: inline-block;
+    margin-right: 10px
+}
+.num_input {
+    height: 27px;
+    width: 50px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 16px;
+    font-family: monospace;
+    border: 1px solid;
+    outline: none;
+    box-sizing: border-box;
+    vertical-align: top;
+}
+.num_in_btn {
+    height: 27px;
+    width: 27px;
+    display: inline-block;
+    border: solid 1px;
+    text-align: center;
+    line-height: 23px;
+    box-sizing: border-box;
+    font-weight: bold;
+}
+.num_in_minus {
+    border-radius: 5px 0 0 5px;
+}
+.num_in_plus {
+    border-radius: 0 5px 5px 0;
+}
+.in_check_cont {
+    margin-bottom: 10px;
+}
+
+
+.ctrl_line {
+    margin-bottom: 10px;
+}
+
+.t_cont {
+    border: solid 1px;
+    width: max-content;
+    padding: 10px;
+}
+.t1_cont {
+    border-radius: 8px 0 0 0;
+}
+.t2_cont {
+    border-radius: 0 0 8px 8px;
+}
+.t_col {
+    display: inline-block;
+}
+.t_col2 {
+    border-radius: 0 8px 8px 0;
+    border: solid 1px;
+    padding: 10px;
+    vertical-align: top;
 }
 
 .draw_canvas {
@@ -71,3 +140,26 @@ body {
     background: #04AA6D;
     cursor: pointer;
   }
+
+  .clock_ctrl
+  {
+    width: max-content;
+  }
+
+  .clock_disp {
+    position: absolute;
+    left: 400px;
+    top: 5px;
+  }
+
+  .clock_col_in {
+    height: 25px;
+    border-radius: 4px;
+    width: 100px;
+    font-family: monospace;
+    font-size: 16px;
+    text-align: center;
+    display: inline-block;
+    vertical-align: top;
+    box-sizing: border-box;
+}
