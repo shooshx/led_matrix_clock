@@ -1,22 +1,50 @@
 #pragma once
+#include "Prop.h"
 
 extern PxMATRIX display;
 
+
+
 struct TextBlock
 {
-    int font_index = -1;
-    int x = 0;
-    int y = 0;
-    uint16_t color = 0xffff;
+    String m_name;
+    Prop<int16_t> m_font_index;
+    Prop<int16_t> m_x;
+    Prop<int16_t> m_y;
+    Prop<uint16_t> m_color;
+
+    TextBlock(const String& name)
+      : m_name(name)
+      , m_font_index(name + "_font_idx", -1)
+      , m_x(name + "_x", 0)
+      , m_y(name + "_y", 0)
+      , m_color(name + "_color", 0xffff)
+    {  
+    }
+
+    void load(Preferences& pref)
+    {
+        m_font_index.load(pref);
+        m_x.load(pref);
+        m_y.load(pref);
+        m_color.load(pref);
+    }
+    void save(Preferences& pref)
+    {
+        m_font_index.save(pref);
+        m_x.save(pref);
+        m_y.save(pref);
+        m_color.save(pref);        
+    }
 
     void draw(const String& text)
     {
-        if (font_index < 0 || font_index > sizeof(all_fonts)/sizeof(all_fonts[0]) )
+        if (m_font_index.get() < 0 || m_font_index.get() > sizeof(all_fonts)/sizeof(all_fonts[0]) )
             display.setFont(nullptr);
         else
-            display.setFont(all_fonts[font_index].fontPtr);
-        display.setTextColor(color);
-        display.setCursor(x, y);
+            display.setFont(all_fonts[m_font_index.get()].fontPtr);
+        display.setTextColor(m_color.get());
+        display.setCursor(m_x.get(), m_y.get());
         display.print(text);
     }
     
@@ -29,50 +57,77 @@ const char * ampm[] = {"AM", "PM"};
 
 struct ClockPanel
 {
-    TextBlock text1;
-    TextBlock text2;
-    uint16_t back_color = 0;
-    bool show_sec = true;
-    bool show_day = false;
+    String m_name;
+    TextBlock m_text1;
+    TextBlock m_text2;
+    Prop<uint16_t> m_back_color;
+    Prop<bool> m_show_sec;
+    Prop<bool> m_show_day;
 
-    String cur_date;
-    String cur_time;
+    String m_cur_date;
+    String m_cur_time;
 
-    ClockPanel()
+    ClockPanel(const String& name)
+      : m_name(name)
+      , m_text1(name + "_t1")
+      , m_text2(name + "_t2")
+      , m_back_color(name + "_back_col", 0)
+      , m_show_sec(name + "_show_sec", true)
+      , m_show_day(name + "_show_day", false)
     {
-        text2.y = 16;
+        m_text2.m_y.set(16);
+    }
+
+    void load(Preferences& pref)
+    {
+        m_text1.load(pref);
+        m_text2.load(pref);
+        m_back_color.load(pref);
+        m_show_sec.load(pref);
+        m_show_day.load(pref);
+    }
+    void save(Preferences& pref)
+    {
+        m_text1.save(pref);
+        m_text2.save(pref);
+        m_back_color.save(pref);
+        m_show_sec.save(pref);
+        m_show_day.save(pref);
     }
 
     void time_to_strings(time_t local)
     {
-        cur_date = "";  // clear the variables
-        cur_time = "";
+        m_cur_date = "";  // clear the variables
+        m_cur_time = "";
     
         // now format the Time variables into strings with proper names for month, day etc
-        if (show_day) {
-            cur_date += short_days[weekday(local)-1];
-            cur_date += " ";
+        if (m_show_day.get()) {
+            m_cur_date += short_days[weekday(local)-1];
+            m_cur_date += " ";
         }
 
-        cur_date += day(local);
-        cur_date += "/";
+        m_cur_date += day(local);
+        m_cur_date += "/";
         //cur_date += months[month(local)-1];
-        cur_date += month(local);
-        cur_date += "/";
-        cur_date += year(local);
-    
-        cur_time += hour(local);
+        m_cur_date += month(local);
+        m_cur_date += "/";
+        m_cur_date += year(local);
+
+        int h = hour(local);
+        if (h < 10)
+            m_cur_time += "0";
+        m_cur_time += h;
         int sec = second(local);
-        cur_time += ":";
+        m_cur_time += ":";
         int mn = minute(local);
         if(mn < 10)  // add a zero if minute is under 10
-          cur_time += "0";
-        cur_time += mn;
-        if (show_sec) {
-            cur_time += ":";  
+            m_cur_time += "0";
+        m_cur_time += mn;
+        if (m_show_sec.get()) {
+            m_cur_time += ":";  
             if(sec < 10)  // add a zero if minute is under 10
-                cur_time += "0";
-            cur_time += sec;
+                m_cur_time += "0";
+            m_cur_time += sec;
         }
     
         //cur_time += " ";
@@ -84,8 +139,8 @@ struct ClockPanel
     {
         display.clearDisplay();
         time_to_strings(localTime);
-        text1.draw(cur_time);
-        text2.draw(cur_date);
+        m_text1.draw(m_cur_time);
+        m_text2.draw(m_cur_date);
         
     }
 };
@@ -93,12 +148,28 @@ struct ClockPanel
 class ClockState
 {
 public:
-    ClockPanel panel;
+    ClockPanel m_panel;
+    Preferences m_pref;
 
 public:
+    ClockState()
+       : m_panel("p0")
+    {
+        m_pref.begin("clock", true);
+    }
+
+    void load()
+    {
+        m_panel.load(m_pref);
+    }
+    void save()
+    {
+        m_panel.save(m_pref);
+    }
+    
     void draw(time_t localTime)
     {
-        panel.draw(localTime);
+        m_panel.draw(localTime);
     }
 
 };

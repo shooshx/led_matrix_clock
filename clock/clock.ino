@@ -7,6 +7,7 @@
 #include <Time.h>
 #include <TimeLib.h>
 #include <LittleFS.h>
+#include <Preferences.h>
 
 #include <PxMatrix.h>
 
