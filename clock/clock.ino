@@ -1,14 +1,19 @@
 #include <WiFi.h>
-#include <WebServer.h>
+//#include <WebServer.h>
 #include <ESPmDNS.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
+#include <AsyncTCP.h>
+#include "ESPAsyncWebServer.h"
+#include "AsyncJson.h"
 
 #include <Time.h>
 #include <TimeLib.h>
 #include <LittleFS.h>
+//#include "SPIFFS.h"
 #include <Preferences.h>
 
+#include <ArduinoJson.h>
 #include <PxMatrix.h>
 
 #include "my_fonts/fonts_index.h"
@@ -21,7 +26,11 @@ const char* PASSW = "abcdeg123458";
 
 //int LED_BUILTIN = 2;
 
-WebServer server(80);
+//WebServer server(80);
+
+AsyncWebServer server(80);
+//AsyncWebSocket ws("/ws"); // access at ws://[esp ip]/ws
+AsyncEventSource events("/events"); // event source (Server-Sent events)
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
@@ -32,7 +41,6 @@ unsigned long epochTime;
 int tzOffset = +3;
 
 
-
 #define P_LAT 22
 #define P_A 19
 #define P_B 23
@@ -40,8 +48,6 @@ int tzOffset = +3;
 #define P_D 5
 #define P_E 15
 #define P_OE 2
-hw_timer_t * timer = NULL;
-portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
 PxMATRIX display(64,32,P_LAT, P_OE,P_A,P_B,P_C,P_D);
 
@@ -81,36 +87,15 @@ void listAllFilesInDir(String dir_path)
   dir.close();
 }
 
-void exposeFiles(String dir_path)
-{
-  File dir = LittleFS.open(dir_path);
-  File f = dir.openNextFile();
-  while(f) {
-    if (!f.isDirectory()) {
-      // print file names
-      Serial.print("Adding handler: ");
-      String name = dir_path + f.name();
-      Serial.println(name);
-      server.serveStatic(name.c_str(), LittleFS, name.c_str());
-    }
-    else {
-      // print directory names
-      Serial.print("Dir: ");
-      Serial.println(dir_path + f.name() + "/");
-      // recursive file listing inside new directory
-      exposeFiles(dir_path + f.name() + "/");
-    }
-    f = dir.openNextFile();
-  }
-}
 
 
 void setupFs()
 {
     if(!LittleFS.begin()){
-      Serial.println("An Error has occurred while mounting LittleFS");
+      Serial.println("An Error has occurred while mounting FS");
       return;
     }
+    Serial.println("FS mounted successfully");
     listAllFilesInDir("/");
 }
 
@@ -145,38 +130,134 @@ void setupNtp()
   //timeClient.setTimeOffset(3600);
 }
 
-void handle_hello() {
-  Serial.println("got hello");
-  server.send(200, "text/plain", "hello world"); 
+
+
+void set_builtin_led(bool v) 
+{
+  if (v)
+    digitalWrite(LED_BUILTIN, 1);  
+  else
+    digitalWrite(LED_BUILTIN, 0);  
 }
 
-void handle_NotFound(){
-  Serial.println("got not found");
-  server.send(404, "text/plain", "Not found");
-}
-
-void handle_led();
-void handle_getTime();
 
 void setupWeb()
 {
-  server.on("/hello", handle_hello);
-  server.on("/led", handle_led);
-  server.on("/gettime", handle_getTime);
-  server.onNotFound(handle_NotFound);
-  exposeFiles("/");
+    //server.addHandler(&ws);
 
-  server.begin();
-  Serial.println("HTTP server started");
+    server.addHandler(&events);
+
+    // respond to GET requests on URL /heap
+    server.on("/heap", HTTP_GET, [](AsyncWebServerRequest *request){
+        request->send(200, "text/plain", String(ESP.getFreeHeap()));
+    });
+    server.on("/hello", HTTP_GET, [](AsyncWebServerRequest *request){
+        Serial.println("got hello");
+        request->send(200, "text/plain", "hello world"); 
+    });
+    server.on("/gettime", HTTP_GET, [](AsyncWebServerRequest *request){
+        request->send(200, "text/plain", String(epochTime));
+    });
+    server.on("/led", HTTP_GET, [](AsyncWebServerRequest *request){
+        if (request->args() == 0) {
+            request->send(200, "text/plain", "no-arg");
+            return;
+        }
+        bool v = request->arg((size_t)0) == "1";
+        set_builtin_led(v);
+        request->send(200, "text/plain", String("ok ") + v);
+    });
+
+    server.on("/pref", HTTP_GET, [](AsyncWebServerRequest *request){
+        AsyncJsonResponse * response = new AsyncJsonResponse(false, 1024);
+        response->addHeader("Server","ESP Clock");
+        JsonObject root = response->getRoot();
+        clock_state.toJson(root.createNestedObject("clock"));
+        response->setLength();
+        request->send(response);
+    });
+
+    server.serveStatic("/", LittleFS, "/");
+
+    // Catch-All Handlers Any request that can not find a Handler that canHandle it ends in the callbacks below.
+    server.onNotFound([](AsyncWebServerRequest *request){
+        //Handle Unknown Request
+        request->send(404);
+    });
+    server.onFileUpload([](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+       //Handle upload
+    });
+    server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+       //Handle body
+    });
+    
+    server.begin();
+}
+
+// from https://github.com/2dom/PxMatrix/issues/225
+#define CORE_1 1
+TaskHandle_t displayUpdateTaskHandle = NULL;
+hw_timer_t * timer = NULL;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
+void IRAM_ATTR display_updater()
+{
+  portENTER_CRITICAL_ISR(&timerMux);
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  //notify task to unblock it 
+  vTaskNotifyGiveFromISR(displayUpdateTaskHandle, &xHigherPriorityTaskWoken );
+
+  //display task will be unblocked
+  if(xHigherPriorityTaskWoken){
+    //force context switch
+    portYIELD_FROM_ISR( );
+  }
+  portEXIT_CRITICAL_ISR(&timerMux);
+}
+ 
+void displayUpdateTask(void *)
+{
+  for(;;){
+    //block here untill timer ISR unblocks task
+    if (ulTaskNotifyTake( pdTRUE, portMAX_DELAY)){
+        display.display(70);
+    }
+  }
+}
+
+void setupDisplayISR()
+{
+  /* we create a new task here */
+  xTaskCreatePinnedToCore(
+    displayUpdateTask, /* where display() actually runs. */
+    "displayUpdateTask", /* name of task. */
+    2048, /* Stack size of task */
+    NULL, /* parameter of the task */
+    3, /* Highest priority so it is immediately launched on context switch after the ISR */
+    &displayUpdateTaskHandle, /* Task handle to use for task notification */
+    CORE_1);
+
+  timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(timer, &display_updater, true);
+  timerAlarmWrite(timer, 4000, true);
+  timerAlarmEnable(timer);
 }
 
 
-void IRAM_ATTR display_updater(){
+void IRAM_ATTR display_updater_old(){
   // Increment the counter and set the time of ISR
   portENTER_CRITICAL_ISR(&timerMux);
   display.display(70);
   //display.displayTestPattern(70);
   portEXIT_CRITICAL_ISR(&timerMux);
+}
+
+void setupDisplayISR_old()
+{
+  timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(timer, &display_updater_old, true);
+  timerAlarmWrite(timer, 4000, true);
+  timerAlarmEnable(timer);
 }
 
 
@@ -187,22 +268,18 @@ uint16_t myRED = display.color565(255, 0, 0);
 void setupDisplay() 
 {
   display.begin(8);
-  
   display.setPanelsWidth(2);
-
   display.clearDisplay();
   display.flushDisplay();
-  
+
   display.setTextColor(myCYAN);
   display.setCursor(2,0);
   display.print("Pixel");
   display.setTextWrap(false);
 
-  timer = timerBegin(0, 80, true);
-  timerAttachInterrupt(timer, &display_updater, true);
-  timerAlarmWrite(timer, 4000, true);
-  timerAlarmEnable(timer);
-
+  //setupDisplayISR();
+  setupDisplayISR_old();
+  
   Serial.println("initialized display");
 
 
@@ -233,73 +310,26 @@ bool updateTime()
 }
 
 
-void timeToStrings()
-{
-      // convert received time stamp to time_t object
-    time_t local, utc;
-    utc = epochTime;
-    local = utc + tzOffset * 3600;
-
-    cur_date = "";  // clear the variables
-    cur_time = "";
-
-    // now format the Time variables into strings with proper names for month, day etc
-    cur_date += days[weekday(local)-1];
-    cur_date += ", ";
-    cur_date += months[month(local)-1];
-    cur_date += " ";
-    cur_date += day(local);
-    cur_date += ", ";
-    cur_date += year(local);
-
-    // format the time to 12-hour format with AM/PM and no seconds
-    cur_time += hourFormat12(local);
-    cur_time += ":";
-    int mn = minute(local);
-    if(mn < 10)  // add a zero if minute is under 10
-      cur_time += "0";
-    cur_time += mn;
-    cur_time += ":";
-    int sec = second(local);
-    if(sec < 10)  // add a zero if minute is under 10
-      cur_time += "0";
-    cur_time += sec;
-
-    cur_time += " ";
-    cur_time += ampm[isPM(local)];
-}
-
-
-void printTime()
-{
-  display.clearDisplay();
-
-  timeToStrings();
-
-  //display.setFont(&DiamondRegularRNormal12);
-  display.setTextColor(myCYAN);
-  display.setCursor(2,2);
-  display.print(cur_time);
-
-  //display.setFont(&HelveticaRegularRNormal11);
-  display.setTextColor(myRED);
-  display.setCursor(2,16);
-  display.print(cur_date);
-}
 
 void loop(void){
   // MDNS.update(); not needed?
   
-  server.handleClient();
-  bool timeChanged = updateTime();
-  
+  bool timeChanged = updateTime(); // TODO: needed this often?
+
   if (timeChanged)
   {
-    //printTime();
+    //unsigned long start_time=micros();
+    
     time_t utc = epochTime;
     time_t local = utc + tzOffset * 3600;
     clock_state.draw(local);
+
+    //unsigned long elapsed = micros() - start_time;
+    //Serial.print("draw took ");
+    //Serial.println(elapsed);
+
   }
+
 
   /*
   digitalWrite(LED_BUILTIN, LOW);  
@@ -307,22 +337,4 @@ void loop(void){
   digitalWrite(LED_BUILTIN, HIGH); 
   delay(500);
   */
-}
-
-void handle_led() 
-{
-  if (server.arg(0) == "1")
-    digitalWrite(LED_BUILTIN, 1);  
-  else
-    digitalWrite(LED_BUILTIN, 0);  
-
-  server.send(200, "text/plain", String("ok ") + server.arg(0));
-}
-
-void handle_getTime()
-{
-    timeToStrings();
-
-    server.send(200, "text/plain", cur_time + "\n" + cur_date);
-
 }

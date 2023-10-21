@@ -5,7 +5,7 @@ extern PxMATRIX display;
 
 
 
-struct TextBlock
+struct TextBlock : public PropHolder<4>
 {
     String m_name;
     Prop<int16_t> m_font_index;
@@ -13,30 +13,15 @@ struct TextBlock
     Prop<int16_t> m_y;
     Prop<uint16_t> m_color;
 
-    TextBlock(const String& name)
-      : m_name(name)
-      , m_font_index(name + "_font_idx", -1)
-      , m_x(name + "_x", 0)
-      , m_y(name + "_y", 0)
-      , m_color(name + "_color", 0xffff)
+    TextBlock(IPropHolder* parent, const String& name)
+      : PropHolder(parent), m_name(name)
+      , m_font_index(this, name + "_font_idx", -1)
+      , m_x(this, name + "_x", 0)
+      , m_y(this, name + "_y", 0)
+      , m_color(this, name + "_color", 0xffff)
     {  
     }
-
-    void load(Preferences& pref)
-    {
-        m_font_index.load(pref);
-        m_x.load(pref);
-        m_y.load(pref);
-        m_color.load(pref);
-    }
-    void save(Preferences& pref)
-    {
-        m_font_index.save(pref);
-        m_x.save(pref);
-        m_y.save(pref);
-        m_color.save(pref);        
-    }
-
+     
     void draw(const String& text)
     {
         if (m_font_index.get() < 0 || m_font_index.get() > sizeof(all_fonts)/sizeof(all_fonts[0]) )
@@ -55,7 +40,7 @@ const char * short_days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"} ;
 const char * months[] = {"Jan", "Feb", "Mar", "Apr", "May", "June", "July", "Aug", "Sep", "Oct", "Nov", "Dec"} ;
 const char * ampm[] = {"AM", "PM"}; 
 
-struct ClockPanel
+struct ClockPanel : public PropHolder<5>
 {
     String m_name;
     TextBlock m_text1;
@@ -68,31 +53,14 @@ struct ClockPanel
     String m_cur_time;
 
     ClockPanel(const String& name)
-      : m_name(name)
-      , m_text1(name + "_t1")
-      , m_text2(name + "_t2")
-      , m_back_color(name + "_back_col", 0)
-      , m_show_sec(name + "_show_sec", true)
-      , m_show_day(name + "_show_day", false)
+      : PropHolder(nullptr), m_name(name)
+      , m_text1(this, name + "_t1")
+      , m_text2(this, name + "_t2")
+      , m_back_color(this, name + "_back_col", 0)
+      , m_show_sec(this, name + "_show_sec", true)
+      , m_show_day(this, name + "_show_day", false)
     {
         m_text2.m_y.set(16);
-    }
-
-    void load(Preferences& pref)
-    {
-        m_text1.load(pref);
-        m_text2.load(pref);
-        m_back_color.load(pref);
-        m_show_sec.load(pref);
-        m_show_day.load(pref);
-    }
-    void save(Preferences& pref)
-    {
-        m_text1.save(pref);
-        m_text2.save(pref);
-        m_back_color.save(pref);
-        m_show_sec.save(pref);
-        m_show_day.save(pref);
     }
 
     void time_to_strings(time_t local)
@@ -138,6 +106,7 @@ struct ClockPanel
     void draw(time_t localTime)
     {
         display.clearDisplay();
+        //display.fillScreen(m_back_color.get());
         time_to_strings(localTime);
         m_text1.draw(m_cur_time);
         m_text2.draw(m_cur_date);
@@ -165,6 +134,10 @@ public:
     void save()
     {
         m_panel.save(m_pref);
+    }
+    void toJson(const JsonObject& obj)
+    {
+        m_panel.toJson(obj);
     }
     
     void draw(time_t localTime)
