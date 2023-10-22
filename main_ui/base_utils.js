@@ -64,3 +64,69 @@ class GfxCanvas
     }
 
 }
+
+
+
+
+let running_id = 1
+function add_select(parent, label, values, init_value, cb)
+{
+    let lbl = null
+    if (label !== null) {
+        lbl = add_elem(parent, 'label', 'combo_label')
+        lbl.innerText = label
+    }
+    const sel = add_elem(parent, 'select', 'combo_sel')
+    const id = 'sel_' + running_id++;
+    sel.setAttribute('id', id)
+    if (lbl)
+        lbl.setAttribute('for', id)
+    for(let v of values) {
+        const opt = add_elem(sel, 'option', 'combo_opt')
+        opt.setAttribute('value', v.value)
+        opt.innerText = v.text
+    }
+    sel.value = init_value
+    sel.addEventListener('change', ()=>{ cb(sel.value) } )
+    return sel
+}
+
+function add_num_input(parent, label, init_val, cb)
+{
+    if (label != null) {
+        const lbl = add_elem(parent, 'label', 'num_in_label')
+        lbl.innerText = label
+    }
+    const cont = add_elem(parent, 'div', 'num_in_cont')
+    const minus_btn = add_elem(cont, 'div', ['num_in_minus', 'num_in_btn'])
+    minus_btn.innerHTML = '&ndash;'
+
+    const inp = add_elem(cont, 'input', 'num_input')
+    inp.setAttribute('type', 'number')
+    inp.setAttribute('readonly', true)
+    inp.value = init_val
+    inp.addEventListener('change', ()=>{ cb(inp.value) } )
+
+    const plus_btn = add_elem(cont, 'div', ['num_in_plus', 'num_in_btn'])
+    plus_btn.innerText = '+'
+
+    minus_btn.addEventListener('click', ()=>{ inp.value = parseInt(inp.value) - 1; cb(inp.value) })
+    plus_btn.addEventListener('click', ()=>{ inp.value = parseInt(inp.value) + 1; cb(inp.value) })
+    return inp
+}
+
+function add_checkbox_input(parent, label, init_val, cb)
+{
+    const cont = add_elem(parent, 'div', 'in_check_cont')
+    const inp = add_elem(cont, 'input', 'in_checkbox')
+    inp.setAttribute('type', 'checkbox')
+    const lbl = add_elem(cont, 'label', 'in_check_label')
+    lbl.innerText = label
+
+    const id = 'check_' + running_id++;
+    inp.setAttribute('id', id)
+    lbl.setAttribute('for', id)
+
+    inp.checked = init_val
+    inp.addEventListener('change', ()=>{ cb(inp.checked) })
+}

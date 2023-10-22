@@ -8,6 +8,32 @@
 #include "Adafruit_GFX.h"
 #include "../clock/my_fonts/fonts_index.h"
 
+// https://stackoverflow.com/questions/2442576/how-does-one-convert-16-bit-rgb565-to-24-bit-rgb888
+uint16_t color565(uint8_t R8, uint8_t G8, uint8_t B8) 
+{
+    int R5 = ( R8 * 249 + 1014 ) >> 11;
+    int G6 = ( G8 * 253 +  505 ) >> 10;
+    int B5 = ( B8 * 249 + 1014 ) >> 11;
+    return ( (B5 & 0x1F) | ((G6 & 0x3F) << 5) | ((R5 & 0x1F) << 11) );
+}
+
+std::tuple<uint8_t, uint8_t, uint8_t> color888(uint32_t v)
+{
+    uint16_t R5 = (v >> 11) & 0x1F;
+    uint16_t G6 = (v >> 5) & 0x3F;
+    uint16_t B5 = v & 0x1F;
+    uint8_t R8 = ( R5 * 527 + 23 ) >> 6;
+    uint8_t G8 = ( G6 * 259 + 33 ) >> 6;
+    uint8_t B8 = ( B5 * 527 + 23 ) >> 6;
+    return std::make_tuple(R8, G8, B8);
+}
+
+std::vector<uint8_t> color888v(uint32_t v)
+{
+    auto [r, g, b] = color888(v);
+    return std::vector<uint8_t>{r, g, b};
+}
+
 class JsDisplay : public Adafruit_GFX
 {
 public:
@@ -24,26 +50,6 @@ public:
     {
         setCursor(x, y);
         print(String(s.c_str()));
-    }
-
-    // https://stackoverflow.com/questions/2442576/how-does-one-convert-16-bit-rgb565-to-24-bit-rgb888
-    uint16_t color565(uint8_t R8, uint8_t G8, uint8_t B8) 
-    {
-        int R5 = ( R8 * 249 + 1014 ) >> 11;
-        int G6 = ( G8 * 253 +  505 ) >> 10;
-        int B5 = ( B8 * 249 + 1014 ) >> 11;
-        return ( (B5 & 0x1F) | ((G6 & 0x3F) << 5) | ((R5 & 0x1F) << 11) );
-    }
-
-    std::tuple<uint8_t, uint8_t, uint8_t> color888(uint32_t v)
-    {
-        uint16_t R5 = (v >> 11) & 0x1F;
-        uint16_t G6 = (v >> 5) & 0x3F;
-        uint16_t B5 = v & 0x1F;
-        uint8_t R8 = ( R5 * 527 + 23 ) >> 6;
-        uint8_t G8 = ( G6 * 259 + 33 ) >> 6;
-        uint8_t B8 = ( B5 * 527 + 23 ) >> 6;
-        return std::make_tuple(R8, G8, B8);
     }
 
     void set_text_color(int r, int g, int b)
@@ -105,11 +111,14 @@ std::vector<std::string> gfx_get_fonts()
 
 EMSCRIPTEN_BINDINGS(my_module)
 {
-    emscripten::function("gfx_init_display", &gfx_init_display);
-    emscripten::register_vector<std::string>("StringList");
-    emscripten::function("gfx_get_fonts", &gfx_get_fonts);
+    using namespace emscripten;
+    function("gfx_init_display", &gfx_init_display);
+    register_vector<std::string>("StringList");
+    register_vector<uint8_t>("UInt8List");
+    function("gfx_get_fonts", &gfx_get_fonts);
+    function("color888v", &color888v);
 
-    emscripten::class_<JsDisplay>("JsDisplay")
+    class_<JsDisplay>("JsDisplay")
         .smart_ptr<std::shared_ptr<JsDisplay>>("JsDisplay")
         .function("print_str_at", &JsDisplay::print_str_at)
         .function("set_text_color", &JsDisplay::set_text_color)

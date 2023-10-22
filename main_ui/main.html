@@ -13,70 +13,8 @@
 const PX_WIDTH = 64
 const PX_HEIGHT = 32
 
-let clock_canvas =  null
+//let clock_canvas =  null
 
-let running_id = 1
-function add_select(parent, label, values, init_value, cb)
-{
-    let lbl = null
-    if (label !== null) {
-        lbl = add_elem(parent, 'label', 'combo_label')
-        lbl.innerText = label
-    }
-    const sel = add_elem(parent, 'select', 'combo_sel')
-    const id = 'sel_' + running_id++;
-    sel.setAttribute('id', id)
-    if (lbl)
-        lbl.setAttribute('for', id)
-    for(let v of values) {
-        const opt = add_elem(sel, 'option', 'combo_opt')
-        opt.setAttribute('value', v.value)
-        opt.innerText = v.text
-    }
-    sel.value = init_value
-    sel.addEventListener('change', ()=>{ cb(sel.value) } )
-    return sel
-}
-
-function add_num_input(parent, label, init_val, cb)
-{
-    if (label != null) {
-        const lbl = add_elem(parent, 'label', 'num_in_label')
-        lbl.innerText = label
-    }
-    const cont = add_elem(parent, 'div', 'num_in_cont')
-    const minus_btn = add_elem(cont, 'div', ['num_in_minus', 'num_in_btn'])
-    minus_btn.innerHTML = '&ndash;'
-
-    const inp = add_elem(cont, 'input', 'num_input')
-    inp.setAttribute('type', 'number')
-    inp.setAttribute('readonly', true)
-    inp.value = init_val
-    inp.addEventListener('change', ()=>{ cb(inp.value) } )
-
-    const plus_btn = add_elem(cont, 'div', ['num_in_plus', 'num_in_btn'])
-    plus_btn.innerText = '+'
-
-    minus_btn.addEventListener('click', ()=>{ inp.value = parseInt(inp.value) - 1; cb(inp.value) })
-    plus_btn.addEventListener('click', ()=>{ inp.value = parseInt(inp.value) + 1; cb(inp.value) })
-    return inp
-}
-
-function add_checkbox_input(parent, label, init_val, cb)
-{
-    const cont = add_elem(parent, 'div', 'in_check_cont')
-    const inp = add_elem(cont, 'input', 'in_checkbox')
-    inp.setAttribute('type', 'checkbox')
-    const lbl = add_elem(cont, 'label', 'in_check_label')
-    lbl.innerText = label
-
-    const id = 'check_' + running_id++;
-    inp.setAttribute('id', id)
-    lbl.setAttribute('for', id)
-
-    inp.checked = init_val
-    inp.addEventListener('change', ()=>{ cb(inp.checked) })
-}
 
 var FONT_OPT = null
 function font_opts() {
@@ -104,15 +42,21 @@ class Color
     }
 }
 
+function color888(c) {
+    const vec = Module.color888v(c);
+    const r = vec.get(0), g = vec.get(1), b = vec.get(2)
+    return new Color(r, g, b)
+}
+
 class TextBlock
 {
-    constructor(text, font_index, x, y)
+    constructor(name, prefJson, text, font_index, x, y)
     {
         this.text = text
-        this.font_index = font_index
-        this.x = x
-        this.y = y
-        this.color = new Color(0, 128, 255)
+        this.font_index = prefJson[name + "_font_idx"]
+        this.x = prefJson[name + "_x"]
+        this.y = prefJson[name + "_y"]
+        this.color = color888(prefJson[name + "_color"])
     }
     draw(gfx) {
         gfx.set_font(this.font_index)
@@ -151,15 +95,17 @@ class TextBlock
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
+
+
 class ClockPanel
 {
-    constructor()
+    constructor(name, prefJson)
     {
-        this.text1 = new TextBlock("20:23:45", 5, 1, 1)
-        this.text2 = new TextBlock("Fri 20/10/2023", -1, 0, 20)
-        this.show_seconds = true
-        this.show_day = true
-        this.back_color = new Color(0,0,0)
+        this.text1 = new TextBlock(name + "_t1", prefJson, "20:23:45", 5, 1, 1)
+        this.text2 = new TextBlock(name + "_t2", prefJson, "Fri 20/10/2023", -1, 0, 20)
+        this.show_seconds = prefJson[name + "_show_sec"]
+        this.show_day = prefJson[name + "_show_day"]
+        this.back_color = color888(prefJson[name + "_back_col"])
     }
 
     start_time(display_cb) {
@@ -227,12 +173,12 @@ class ClockPanel
     }
 }
 
-function clock_onload()
+function clock_onload(prefJson)
 {
     const clock = add_elem(body, 'div', 'clock_top')
     const ctrl = add_elem(clock, 'div', 'clock_ctrl')
     const disp = add_elem(clock, 'div', 'clock_disp')
-    clock_canvas = new GfxCanvas(PX_WIDTH, PX_HEIGHT, 5, disp, 0, "clock_canvas")
+    const clock_canvas = new GfxCanvas(PX_WIDTH, PX_HEIGHT, 5, disp, 0, "clock_canvas")
     Module.gfx_init_display(clock_canvas, PX_WIDTH, PX_HEIGHT)
 
     let panel = null
@@ -243,26 +189,46 @@ function clock_onload()
         clock_canvas.draw()
     }
 
-    panel = new ClockPanel()
+    panel = new ClockPanel("p0", prefJson.clock)
     panel.add_ui(ctrl, display)
     panel.start_time(display)
-
 
     display()
 
 }
 
+function download(url, cb)
+{
+    const req = new XMLHttpRequest()
+    req.addEventListener("load", function() {
+        if (this.readyState == 4 && this.status == 200) {
+            cb(this.responseText)
+            return
+        }
+        const msg = "Error: " + this.readyState + "," + this.status + "," + this.responseText
+        console.error(msg)
+    })
+    req.addEventListener("error", function() {
+        console.error(msg)
+    })
+    req.open("GET", url)
+    req.send()
+}
+
 function page_onload()
 {
-    
     //draw_pixel_onload(body, PX_WIDTH, PX_HEIGHT)
 }
 
 
-
 function rt_start()
 {
-    clock_onload()
+    download("/pref", (resText)=>{
+        const prefJson = JSON.parse(resText)
+
+        clock_onload(prefJson)
+    })
+    
     
 
 }

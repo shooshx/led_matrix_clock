@@ -277,8 +277,8 @@ void setupDisplay()
   display.print("Pixel");
   display.setTextWrap(false);
 
-  //setupDisplayISR();
-  setupDisplayISR_old();
+  setupDisplayISR();
+  //setupDisplayISR_old();
   
   Serial.println("initialized display");
 
