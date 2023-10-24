@@ -117,6 +117,7 @@ EMSCRIPTEN_BINDINGS(my_module)
     register_vector<uint8_t>("UInt8List");
     function("gfx_get_fonts", &gfx_get_fonts);
     function("color888v", &color888v);
+    function("color565", &color565);
 
     class_<JsDisplay>("JsDisplay")
         .smart_ptr<std::shared_ptr<JsDisplay>>("JsDisplay")

@@ -206,11 +206,9 @@ function connect_events(canvas, s)
     });
 }
 
-// TODO color picker drag
-// TODO color picker dismiss on touch outside
 
 
-function draw_pixel_onload(root, w, h)
+function draw_pixel_create(root, w, h)
 {
     const top_elem = add_elem(root, 'div', 'draw_top')
     const control_elem = add_elem(top_elem, 'div', 'draw_control')

@@ -8,229 +8,76 @@
 <script src="ColorPicker.js"></script>
 <script src="pixel_draw.js"></script>
 <script src="asm_gfx.js"></script>
+<script src="clock.js"></script>
 <script>
 
 const PX_WIDTH = 64
 const PX_HEIGHT = 32
 
-//let clock_canvas =  null
 
-
-var FONT_OPT = null
-function font_opts() {
-    if (FONT_OPT !== null)
-        return FONT_OPT
-    const font_strs = Module.gfx_get_fonts()
-    FONT_OPT = [{value:-1, text:'Default'}]
-    for(let i = 0; i < font_strs.size(); ++i)
-        FONT_OPT.push({value:i, text:font_strs.get(i)})
-    return FONT_OPT
-}
-
-class Color
-{
-    constructor(r, g, b)
-    {
-        this.r = r
-        this.g = g
-        this.b = b
-    }
-    set(c) {
-        this.r = c.r
-        this.g = c.g
-        this.b = c.b
-    }
-}
-
-function color888(c) {
-    const vec = Module.color888v(c);
-    const r = vec.get(0), g = vec.get(1), b = vec.get(2)
-    return new Color(r, g, b)
-}
-
-class TextBlock
-{
-    constructor(name, prefJson, text, font_index, x, y)
-    {
-        this.text = text
-        this.font_index = prefJson[name + "_font_idx"]
-        this.x = prefJson[name + "_x"]
-        this.y = prefJson[name + "_y"]
-        this.color = color888(prefJson[name + "_color"])
-    }
-    draw(gfx) {
-        gfx.set_font(this.font_index)
-        gfx.set_text_color(this.color.r, this.color.g, this.color.b)
-        gfx.print_str_at(this.x, this.y, this.text)
-    }
-
-    add_ui(ctrl, display_cb) 
-    {
-        const ctrl_line1 = add_elem(ctrl, 'div', 'ctrl_line')
-        const col_in = add_elem(ctrl_line1, 'input', 'clock_col_in')
-        col_in.setAttribute('readonly', true)
-        ColorEditBox.create_at(col_in, 300, (c)=>{ 
-            this.color.set(c) 
-            display_cb()
-        }, {}, ColorPicker.make_hex(this.color, true))
-
-        add_select(ctrl_line1, null, font_opts(), this.font_index, (value)=>{
-            this.font_index = parseInt(value)
-            display_cb()
-        })
-
-        const ctrl_line2 = add_elem(ctrl, 'div', 'ctrl_line_last')
-        add_num_input(ctrl_line2, null, this.x, (value)=>{
-            this.x = value
-            display_cb()
-        })
-        add_num_input(ctrl_line2, null, this.y, (value)=>{
-            this.y = value
-            display_cb()
-        })
-
-
-    }
-}
-
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-
-
-
-class ClockPanel
-{
-    constructor(name, prefJson)
-    {
-        this.text1 = new TextBlock(name + "_t1", prefJson, "20:23:45", 5, 1, 1)
-        this.text2 = new TextBlock(name + "_t2", prefJson, "Fri 20/10/2023", -1, 0, 20)
-        this.show_seconds = prefJson[name + "_show_sec"]
-        this.show_day = prefJson[name + "_show_day"]
-        this.back_color = color888(prefJson[name + "_back_col"])
-    }
-
-    start_time(display_cb) {
-        this.update_time(display_cb)
-        window.setInterval(()=>{ this.update_time(display_cb) }, 1000)
-    }
-
-    update_time(display_cb)
-    {
-        const d = new Date()
-        let min = d.getMinutes()
-        if (min < 10)
-            min = "0" + min
-        let time = d.getHours() + ":" + min
-        if (this.show_seconds) {
-            let sec = d.getSeconds()
-            if (sec < 10)
-                sec = "0" + sec
-            time += ":" + sec
-        }
-        let date = ""
-        if (this.show_day) 
-            date += DAY_NAMES[d.getDay()] + " "
-        date += d.getDate()
-        date += "/" + d.getMonth() + "/"
-        date += d.getFullYear()
-        
-        this.text1.text = time
-        this.text2.text = date
-        display_cb()
-    }
-
-    add_ui(ctrl, display_cb)
-    {
-        const col1 = add_elem(ctrl, 'div', ['t_col', 't_col1'])
-        const t1cont = add_elem(col1, 'div', ['t_cont', 't1_cont'])
-        this.text1.add_ui(t1cont, display_cb)
-
-        const t2cont = add_elem(col1, 'div', ['t_cont', 't2_cont'])
-        this.text2.add_ui(t2cont, display_cb)
-
-        const col2 = add_elem(ctrl, 'div', ['t_col', 't_col2'])
-        add_checkbox_input(col2, "Seconds", this.show_seconds, (v)=>{
-            this.show_seconds = v
-            this.update_time(display_cb)
-        })
-        add_checkbox_input(col2, "Show Day", this.show_day, (v)=>{
-            this.show_day = v
-            this.update_time(display_cb)
-        })
-
-        const col_in = add_elem(col2, 'input', 'clock_col_in')
-        col_in.setAttribute('readonly', true)
-        ColorEditBox.create_at(col_in, 300, (c)=>{ 
-            this.back_color.set(c) 
-            display_cb()
-        }, {}, ColorPicker.make_hex(this.back_color, true))
-    }
-
-    draw(gfx)
-    {
-        gfx.set_back_col(this.back_color.r, this.back_color.g, this.back_color.b)
-        this.text1.draw(gfx)
-        this.text2.draw(gfx)
-    }
-}
-
-function clock_onload(prefJson)
-{
-    const clock = add_elem(body, 'div', 'clock_top')
-    const ctrl = add_elem(clock, 'div', 'clock_ctrl')
-    const disp = add_elem(clock, 'div', 'clock_disp')
-    const clock_canvas = new GfxCanvas(PX_WIDTH, PX_HEIGHT, 5, disp, 0, "clock_canvas")
-    Module.gfx_init_display(clock_canvas, PX_WIDTH, PX_HEIGHT)
-
-    let panel = null
-
-    const display = ()=>{
-        clock_canvas.gfx.clear()
-        panel.draw(clock_canvas.gfx)
-        clock_canvas.draw()
-    }
-
-    panel = new ClockPanel("p0", prefJson.clock)
-    panel.add_ui(ctrl, display)
-    panel.start_time(display)
-
-    display()
-
-}
-
-function download(url, cb)
-{
-    const req = new XMLHttpRequest()
-    req.addEventListener("load", function() {
-        if (this.readyState == 4 && this.status == 200) {
-            cb(this.responseText)
-            return
-        }
-        const msg = "Error: " + this.readyState + "," + this.status + "," + this.responseText
-        console.error(msg)
-    })
-    req.addEventListener("error", function() {
-        console.error(msg)
-    })
-    req.open("GET", url)
-    req.send()
-}
 
 function page_onload()
 {
     //draw_pixel_onload(body, PX_WIDTH, PX_HEIGHT)
 }
 
+let ws_ref = null
+
+function ws_connect()
+{
+    let url = ""
+    if (window.location.protocol == "https:")
+        url = "wss://"
+    else
+        url = "ws://"
+    url += window.location.host
+    if (window.location.port.length > 0)
+        url += ":" + window.location.port
+    url += "/ws"
+    console.log("ws url: ", url)
+
+    //url = "ws://localhost"
+
+    const ws = new WebSocket(url) //, "cmdss")
+    ws_ref = ws
+    ws.addEventListener("open", (e)=>{
+        //socket.send("Hello Server!")
+        console.log("WS connected")
+    })
+
+    ws.addEventListener("message", (e)=>{
+        console.log("WS mesg:", e.data)
+    })
+
+    ws.addEventListener("error", (e)=>{
+        console.log("WS error:", e, " b ", JSON.stringify(e), " c ", ws.readyState, " d ", JSON.stringify(ws))
+    })
+    ws.addEventListener("close", (e)=>{
+        console.log("WS close:", e, " a ", e.code, " b ", JSON.stringify(e))
+    })
+
+    const send = (cmd)=>{
+        try {
+            ws.send(cmd)
+        }
+        catch(e) {
+            console.log(e)
+        }
+    }
+
+    return { send:send }
+}
 
 function rt_start()
 {
-    download("/pref", (resText)=>{
+    const ws = ws_connect()
+
+    download("/pref?t=" + new Date().getTime(), (resText)=>{
         const prefJson = JSON.parse(resText)
 
-        clock_onload(prefJson)
+        clock_create(body, prefJson, ws)
     })
     
-    
-
 }
 
 Module.onRuntimeInitialized = rt_start

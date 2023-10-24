@@ -29,14 +29,12 @@ const char* PASSW = "abcdeg123458";
 //WebServer server(80);
 
 AsyncWebServer server(80);
-//AsyncWebSocket ws("/ws"); // access at ws://[esp ip]/ws
-AsyncEventSource events("/events"); // event source (Server-Sent events)
+AsyncWebSocket ws("/ws"); // access at ws://[esp ip]/ws
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
 
-String cur_date;
-String cur_time;
+
 unsigned long epochTime;
 int tzOffset = +3;
 
@@ -50,6 +48,7 @@ int tzOffset = +3;
 #define P_OE 2
 
 PxMATRIX display(64,32,P_LAT, P_OE,P_A,P_B,P_C,P_D);
+bool has_display = false;
 
 ClockState clock_state;
 
@@ -141,11 +140,38 @@ void set_builtin_led(bool v)
 }
 
 
+void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+  switch (type) {
+    case WS_EVT_CONNECT:
+      Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+      break;
+    case WS_EVT_DISCONNECT:
+      Serial.printf("WebSocket client #%u disconnected\n", client->id());
+      break;
+    case WS_EVT_DATA:
+      //handleWebSocketMessage(arg, data, len);
+      Serial.printf("WebSocket data len=%d\n", len);
+      break;
+    case WS_EVT_PONG:
+    case WS_EVT_ERROR:
+      Serial.printf("WebSocket error len=%d", len);
+      break;
+    default:
+      Serial.printf("WebSocket unknown event %d\n", type);
+  }
+}
+
+void setupWebSocket() {
+  ws.onEvent(onEvent);
+  server.addHandler(&ws);
+
+  //server.addHandler(&events);
+}
+
+
 void setupWeb()
 {
-    //server.addHandler(&ws);
-
-    server.addHandler(&events);
+    setupWebSocket();
 
     // respond to GET requests on URL /heap
     server.on("/heap", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -169,6 +195,7 @@ void setupWeb()
     });
 
     server.on("/pref", HTTP_GET, [](AsyncWebServerRequest *request){
+        Serial.println("got /pref req");
         AsyncJsonResponse * response = new AsyncJsonResponse(false, 1024);
         response->addHeader("Server","ESP Clock");
         JsonObject root = response->getRoot();
@@ -184,12 +211,14 @@ void setupWeb()
         //Handle Unknown Request
         request->send(404);
     });
+#if 0
     server.onFileUpload([](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
        //Handle upload
     });
     server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
        //Handle body
     });
+#endif
     
     server.begin();
 }
@@ -281,6 +310,7 @@ void setupDisplay()
   //setupDisplayISR_old();
   
   Serial.println("initialized display");
+  has_display = true;
 
 
   //delay(1000);
@@ -322,15 +352,17 @@ void loop(void){
     
     time_t utc = epochTime;
     time_t local = utc + tzOffset * 3600;
-    clock_state.draw(local);
-
+    if (has_display)
+    {
+        clock_state.draw(local);
+    }
     //unsigned long elapsed = micros() - start_time;
     //Serial.print("draw took ");
     //Serial.println(elapsed);
 
   }
 
-
+  ws.cleanupClients();
   /*
   digitalWrite(LED_BUILTIN, LOW);  
   delay(500);
