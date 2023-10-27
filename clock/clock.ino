@@ -18,6 +18,7 @@
 
 #include "my_fonts/fonts_index.h"
 #include "ClockState.h"
+#include "strSplit.h"
 
 
 // Replace with your network credentials
@@ -140,6 +141,37 @@ void set_builtin_led(bool v)
 }
 
 
+
+void handleWebSocketMessage(uint8_t *data, size_t len) {
+    std::vector<char> v;
+    v.resize(len + 1);
+    memcpy(&v[0], data, len);
+    v[len] = 0;
+    String sp[5];
+    String line(&v[0]);
+    Serial.printf("WebSocket data `%s`\n", line.c_str());
+
+    int count = strSplit(line, sp, 5);
+    if (count == 0)
+        return;
+    if (sp[0] == "UC")
+    {
+        if (count != 3) {
+            Serial.printf("Unexpected number of args of UC %d\n", count);
+            return;
+        }
+        //Serial.printf("prop update %s %d\n", sp[1].c_str(), sp[2].toInt());
+        if (clock_state.update_prop(sp[1], sp[2].toInt())) {
+            clock_state.save();
+        }
+    }
+    else
+    {
+        Serial.printf("Unknown command %s\n", sp[0].c_str());
+    }
+}
+
+
 void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
     case WS_EVT_CONNECT:
@@ -148,16 +180,20 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
     case WS_EVT_DISCONNECT:
       Serial.printf("WebSocket client #%u disconnected\n", client->id());
       break;
-    case WS_EVT_DATA:
-      //handleWebSocketMessage(arg, data, len);
-      Serial.printf("WebSocket data len=%d\n", len);
+    case WS_EVT_DATA: {
+      AwsFrameInfo *info = (AwsFrameInfo*)arg;
+      if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+          handleWebSocketMessage(data, len);
+      }
       break;
+    }
     case WS_EVT_PONG:
     case WS_EVT_ERROR:
       Serial.printf("WebSocket error len=%d", len);
       break;
     default:
       Serial.printf("WebSocket unknown event %d\n", type);
+      break;
   }
 }
 
@@ -316,6 +352,11 @@ void setupDisplay()
   //delay(1000);
 }
 
+void setupState()
+{
+    clock_state.load();
+}
+
 void setup(void)
 {
   setupPins();
@@ -326,6 +367,7 @@ void setup(void)
   setupNtp();
   setupWeb();
 
+  setupState();
   setupDisplay();
 }
 

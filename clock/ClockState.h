@@ -52,8 +52,8 @@ struct ClockPanel : public PropHolder<5>
     String m_cur_date;
     String m_cur_time;
 
-    ClockPanel(const String& name)
-      : PropHolder(nullptr), m_name(name)
+    ClockPanel(const String& name, NamesIndex* name_index)
+      : PropHolder(nullptr, name_index), m_name(name)
       , m_text1(this, name + "_t1")
       , m_text2(this, name + "_t2")
       , m_back_color(this, name + "_back_col", 0)
@@ -110,25 +110,28 @@ struct ClockPanel : public PropHolder<5>
         time_to_strings(localTime);
         m_text1.draw(m_cur_time);
         m_text2.draw(m_cur_date);
-        
     }
+
 };
 
 class ClockState
 {
 public:
+    NamesIndex m_prop_map;
     ClockPanel m_panel;
     Preferences m_pref;
 
 public:
     ClockState()
-       : m_panel("p0")
+       : m_panel("p0", &m_prop_map)
     {
-        m_pref.begin("clock", true);
     }
-
+    
     void load()
     {
+        // begin needs to be called from setup(), not in c'tor
+        m_pref.begin("clock", false);
+        Serial.printf("props: %d\n", m_prop_map.size());
         m_panel.load(m_pref);
     }
     void save()
@@ -143,6 +146,18 @@ public:
     void draw(time_t localTime)
     {
         m_panel.draw(localTime);
+    }
+
+    // return true if actually changed value
+    bool update_prop(const String& name, int v)
+    {
+        auto prop = m_prop_map.get(name);
+        if (prop == nullptr) {
+            Serial.printf("prop not found %s\n", name.c_str());
+            return false;
+        }
+        //zSerial.printf("found %s, going to call setInt %d\n", name.c_str(), v);
+        return prop->setInt(v);
     }
 
 };
