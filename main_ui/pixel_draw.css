@@ -3,6 +3,20 @@ body {
     font-family: Verdana;
 }
 
+.section_cont {
+    margin-bottom: 5px;
+}
+.section_hdr {
+    background-color: #cccccc;
+    border-radius: 4px;
+    padding: 6px;
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+.section_hdr[selected=true] {
+    background-color: #d3a8ff;
+}
+
 .combo_sel {
     height: 25px;
     border-radius: 4px;
@@ -144,6 +158,10 @@ body {
   .clock_ctrl
   {
     width: max-content;
+  }
+
+  .clock_top {
+    position: relative;
   }
 
   .clock_disp {

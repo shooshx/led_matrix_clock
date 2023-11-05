@@ -42,6 +42,8 @@ class GfxCanvas
 
         this.image_data = this.shadow_ctx.getImageData(0, 0, this.width, this.height)
         this.pixels = this.image_data.data
+
+        this.pixel_color_cb = null
     }
 
     setPixel(x, y, r, g, b)
@@ -53,6 +55,8 @@ class GfxCanvas
         this.pixels[i+1] = g
         this.pixels[i+2] = b
         this.pixels[i+3] = 255;
+        if (this.pixel_color_cb != null)
+            this.pixel_color_cb(x, y, r, g, b)
     }
 
     draw()
@@ -128,7 +132,7 @@ function add_checkbox_input(parent, label, init_val, cb)
     lbl.setAttribute('for', id)
 
     inp.checked = init_val
-    inp.addEventListener('change', ()=>{ cb(inp.checked) })
+    inp.addEventListener('change', ()=>{ cb(inp.checked ? 1 : 0) })
 }
 
 

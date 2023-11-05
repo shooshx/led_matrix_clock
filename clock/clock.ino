@@ -50,8 +50,80 @@ int tzOffset = +3;
 
 PxMATRIX display(64,32,P_LAT, P_OE,P_A,P_B,P_C,P_D);
 bool has_display = false;
+bool has_serial = false;
 
-ClockState clock_state;
+enum Section {
+    SECTION_CLOCK = 0,
+    SECTION_DRAW = 1
+};
+
+class TopState : public PropHolder<1>
+{
+public:
+    Prop<int16_t> active_section;
+    Preferences m_pref;
+
+    TopState(NamesIndex* prop_map)
+      : PropHolder(prop_map)
+      , active_section(this, "active_section", 0)
+    {}
+
+    void load() {
+        m_pref.begin("top", false);
+        PropHolder::load(m_pref);
+    }
+    void save() {
+        PropHolder::save(m_pref);
+    }
+};
+
+class State
+{
+public:
+    NamesIndex m_prop_map;
+    ClockState clock_state;
+    TopState top;
+
+
+    State()
+        : clock_state(&m_prop_map)
+        , top(&m_prop_map)
+    {
+    }
+
+public:
+    // return true if actually changed value
+    bool update_prop(const String& name, int v)
+    {
+        auto prop = m_prop_map.get(name);
+        if (prop == nullptr) {
+            Serial.printf("prop not found %s\n", name.c_str());
+            return false;
+        }
+        //zSerial.printf("found %s, going to call setInt %d\n", name.c_str(), v);
+        return prop->setInt(v);
+    }
+    
+    void toJson(const JsonObject& root)
+    {
+        top.toJson(root);
+        clock_state.toJson(root.createNestedObject("clock"));
+    }
+
+    void load()
+    {
+        Serial.printf("props: %d\n", m_prop_map.size());
+        clock_state.load();
+        top.load();
+    }
+    void save()
+    {
+        clock_state.save();
+	top.save();
+    }
+};
+
+State* state = nullptr;
 
 void setupPins()
 {
@@ -63,6 +135,7 @@ void setupSerial()
   Serial.begin(115200);         // Start the Serial communication to send messages to the computer
   delay(10);
   Serial.println('\n');
+  has_serial = true;
 }
 
 void listAllFilesInDir(String dir_path)
@@ -140,6 +213,47 @@ void set_builtin_led(bool v)
     digitalWrite(LED_BUILTIN, 0);  
 }
 
+struct PixParse
+{
+    int i = 0;
+    int state = 0;
+    int expect_count = 0;
+    int count = 0;
+    int x = 0, y = 0, col = 0;
+
+    void operator()(const char* s) {
+        Serial.printf("PP `%s` - %d, %d, %d\n", s, i, state, count);
+        if (i == 0) {
+            ++i;  // command
+            return;
+        }
+        if (i == 1) {
+            expect_count = atoi(s);
+            ++i;  // pixel count
+            return;
+        }
+        if (state == 0)
+            x = atoi(s);
+        else if (state == 1)
+            y = atoi(s);
+        else {
+            col = atoi(s);
+            display.drawPixel(x, y, col);
+            Serial.printf("PP-draw %d,%d, %d\n", x, y, col);
+            ++count;
+        }
+        ++state;
+        ++i;
+    }
+};
+
+void parse_pixel_cmd(String& line)
+{
+    PixParse pp;
+    strSplitStream(line, pp);
+    if (pp.count != pp.expect_count)
+        Serial.printf("draw command parsed unexpected number of pixels %d, %d\n", pp.i, pp.expect_count);
+}
 
 
 void handleWebSocketMessage(uint8_t *data, size_t len) {
@@ -147,23 +261,27 @@ void handleWebSocketMessage(uint8_t *data, size_t len) {
     v.resize(len + 1);
     memcpy(&v[0], data, len);
     v[len] = 0;
-    String sp[5];
+    String sp[3];
     String line(&v[0]);
     Serial.printf("WebSocket data `%s`\n", line.c_str());
 
-    int count = strSplit(line, sp, 5);
+    int count = strSplit(line, sp, 3);
     if (count == 0)
         return;
-    if (sp[0] == "UC")
+    if (sp[0] == "U")
     {
         if (count != 3) {
             Serial.printf("Unexpected number of args of UC %d\n", count);
             return;
         }
         //Serial.printf("prop update %s %d\n", sp[1].c_str(), sp[2].toInt());
-        if (clock_state.update_prop(sp[1], sp[2].toInt())) {
-            clock_state.save();
+        if (state->update_prop(sp[1], sp[2].toInt())) {
+            state->save();
         }
+    }
+    else if (sp[0] == "DP")
+    {
+        parse_pixel_cmd(line);        
     }
     else
     {
@@ -235,7 +353,7 @@ void setupWeb()
         AsyncJsonResponse * response = new AsyncJsonResponse(false, 1024);
         response->addHeader("Server","ESP Clock");
         JsonObject root = response->getRoot();
-        clock_state.toJson(root.createNestedObject("clock"));
+        state->toJson(root);
         response->setLength();
         request->send(response);
     });
@@ -354,20 +472,22 @@ void setupDisplay()
 
 void setupState()
 {
-    clock_state.load();
+    state = new State();
+    state->load();
 }
 
 void setup(void)
 {
-  setupPins();
   setupSerial();
+  setupState();
+  setupPins();
   setupFs();
   
   connectWifi();
   setupNtp();
   setupWeb();
 
-  setupState();
+  
   setupDisplay();
 }
 
@@ -388,7 +508,7 @@ void loop(void){
   
   bool timeChanged = updateTime(); // TODO: needed this often?
 
-  if (timeChanged)
+  if (timeChanged && state->top.active_section.get() == SECTION_CLOCK)
   {
     //unsigned long start_time=micros();
     
@@ -396,7 +516,7 @@ void loop(void){
     time_t local = utc + tzOffset * 3600;
     if (has_display)
     {
-        clock_state.draw(local);
+        state->clock_state.draw(local);
     }
     //unsigned long elapsed = micros() - start_time;
     //Serial.print("draw took ");

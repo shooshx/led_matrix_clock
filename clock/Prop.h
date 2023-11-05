@@ -4,13 +4,17 @@
 class IProp
 {
 public:
+    IProp() {}
     virtual void load(Preferences& pref) = 0;
     virtual void save(Preferences& pref) = 0;
     virtual void toJson(const JsonObject& obj) = 0;
     virtual bool setInt(int v) {
-        Serial.printf("bad in IProp");
+        Serial.printf("bad setInt in IProp");
         return false;
     }
+
+    IProp(const IProp&) = delete;
+    IProp& operator=(const IProp&) = delete;
 };
 
 struct StringHashOps {
@@ -36,12 +40,15 @@ struct StringHashOps {
 class NamesIndex
 {
 public:
+    NamesIndex() {
+        //Serial.println("NamesIndex ctor");
+    }
     int size() const {
         return m_index.size();
     }
     void add(const String& name, IProp* prop) {
+        Serial.printf("Adding prop %s\n", name.c_str());
         m_index[name] = prop;
-        Serial.printf("Added prop %s\n", name);
     }
     IProp* get(const String& name) const {
         auto it = m_index.find(name);
@@ -65,19 +72,20 @@ template<int N>
 class PropHolder : public IProp, public IPropHolder
 {
 public:
-    PropHolder(IPropHolder* parent, NamesIndex* name_index = nullptr) 
+    PropHolder(IPropHolder* parent)  // for sub-holders
     {
-        if (parent != nullptr) {
-            parent->reg(this, nullptr);
-        }
-        if (name_index != nullptr)
-            m_name_index = name_index;
-        else if (parent != nullptr)
-            m_name_index = parent->m_name_index;
+        parent->reg(this, nullptr);
+        m_name_index = parent->m_name_index;
+    }
+    PropHolder(NamesIndex* name_index) // for root-holders
+    {
+        m_name_index = name_index;
     }
     void reg(IProp* prop, const String* name) override {
-        if (m_sz == N)
+        if (m_sz == N) {
+            Serial.println("Too many props registering!");
             return;
+        }
         m_arr[m_sz++] = prop;
         if (name != nullptr && m_name_index != nullptr)
             m_name_index->add(*name, prop);
@@ -105,6 +113,8 @@ private:
     int m_sz = 0;
 };
 
+extern bool has_serial;
+
 template<typename T>
 class Prop : public IProp
 {
@@ -120,6 +130,8 @@ public:
     bool m_dirty = false;
 
     bool set(T v) {
+        //if (has_serial)
+        //Serial.printf("Prop setting %s to %d from %d\n", m_name.c_str(), v, m_value);
         if (m_value == v)
             return false;
         m_value = v;
@@ -162,7 +174,7 @@ void Prop<bool>::save(Preferences& pref) {
 template<>
 bool Prop<bool>::setInt(int v) {
     //Serial.printf("setInt(b) %s to %d from %d\n", m_name.c_str(), v, m_value);
-    return set(static_cast<bool>(v));
+    return set(v != 0);
 }
 
 //-----------------------------------------

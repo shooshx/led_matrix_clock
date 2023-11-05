@@ -27,3 +27,31 @@ int strSplit(String& s, String* arr, int arr_len)
         arr[added_count++] = String(s.c_str() + cur_start);
     return added_count;
 }
+
+template<typename TF>
+int strSplitStream(String& s, TF& cb)
+{
+    int added_count = 0;
+    int cur_sz = 0;
+    int cur_start = 0;
+    for (size_t i = 0; i < s.length(); ++i)
+    {
+        auto c = s[i];
+        if (c == ' ') {
+            Serial.printf("SPLIT space %d, %d\n", cur_start, cur_sz);
+            s[i] = 0;
+            if (cur_sz > 0)
+                cb(s.c_str() + cur_start);
+            cur_start = -1;
+            cur_sz = 0;
+        }
+        else {
+            if (cur_start == -1)
+                cur_start = i;
+            ++cur_sz;
+        }
+    }
+    if (cur_sz > 0)
+        cb(s.c_str() + cur_start);
+    return added_count;
+}

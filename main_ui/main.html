@@ -68,14 +68,53 @@ function ws_connect()
     return { send:send }
 }
 
+const sections = []
+
+function create_section(parent, text, init_vis, send_update)
+{
+    const cont = add_elem(parent, 'div', 'section_cont')
+    const header = add_elem(cont, 'div', 'section_hdr')
+    header.innerText = text
+    const e = add_elem(cont, 'div', 'section_elem')
+    const my_index = sections.length
+    header.addEventListener('click', ()=>{
+        for(let s of sections) {
+            if (s.e !== e) {
+                s.e.style.display = 'none'
+                s.header.setAttribute('selected', false)
+            }
+        }
+        e.style.display = 'initial'
+        header.setAttribute('selected', true)
+        send_update('active_section', my_index)
+    })
+    e.style.display = init_vis ? 'initial' : 'none'
+    header.setAttribute('selected', init_vis)
+    sections.push({header:header, e:e, name:text, index:my_index})
+    return e
+}
+
+function create_ui(prefJson, ws)
+{
+    const active_section = prefJson['active_section'] || 0
+    const send_update = (name, value)=>{
+        const cmd = "U " + name + " " + value
+        ws.send(cmd)
+    }
+
+    const clk_e = create_section(body, 'Clock', active_section == 0, send_update)
+    clock_create(clk_e, prefJson, ws)
+    const draw_e = create_section(body, 'Draw', active_section == 1, send_update)
+    draw_pixel_create(draw_e, PX_WIDTH, PX_HEIGHT, ws)
+}
+
 function rt_start()
 {
     const ws = ws_connect()
 
     download("/pref?t=" + new Date().getTime(), (resText)=>{
-        const prefJson = JSON.parse(resText)
-
-        clock_create(body, prefJson, ws)
+        const prefJson = JSON.parse(resText)       
+        create_ui(prefJson, ws)
     })
     
 }

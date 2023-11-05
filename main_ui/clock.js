@@ -92,7 +92,7 @@ function clock_create(parent, pref_json, ws)
         clock_canvas.draw()
     }
     const send_update = (name, value)=>{
-        const cmd = "UC " + name + " " + value
+        const cmd = "U " + name + " " + value
         ws.send(cmd)
     }
 

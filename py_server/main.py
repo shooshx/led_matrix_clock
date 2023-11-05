@@ -58,6 +58,12 @@ class WSPrefHandler(HTTPWebSocketsHandler):
             key = sp[1]
             value = sp[2]
             g_pref_dict['clock'][key] = value
+        elif sp[0] == 'UT':
+            key = sp[1]
+            value = sp[2]
+            g_pref_dict[key] = value
+        elif sp[0] == 'D':
+            pass
         else:
             self.log_message(f"WS unknown command '{sp[0]}' in {message}")
 

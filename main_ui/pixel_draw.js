@@ -5,7 +5,7 @@ const DRAW_PIXEL_SIZE = 20
 
 class DrawState extends GfxCanvas
 {
-    constructor(parent_elem, canvas_name, w, h)
+    constructor(parent_elem, canvas_name, w, h, pixel_color_cb)
     {
         super(w, h, DRAW_PIXEL_SIZE, parent_elem, DRAW_LINE_WIDTH, canvas_name)
 
@@ -17,14 +17,12 @@ class DrawState extends GfxCanvas
         this.tool_color = ColorPicker.parse_hex(localStorage['draw_cur_color'] || '#22AACC')
 
         this.tool_pradius = this.tool_radius * this.PIXEL_SIZE
+        this.pixel_color_cb = pixel_color_cb
         
-
         //for(let i = 0; i < this.pixels.length; ++i)
         //    this.pixels[i] = 0
         //for(let i = 3; i < this.pixels.length; i += 4)
         //    this.pixels[i] = 255; // all alphas
-        
-        
     }
 
     test_pattern()
@@ -49,6 +47,8 @@ class DrawState extends GfxCanvas
         this.pixels[i+1] = ng
         this.pixels[i+2] = nb
         this.pixels[i+3] = na * 255;
+
+        this.pixel_color_cb(x, y, nr * na, ng * na, nb * na)
     }
 
     draw_cavnvas()
@@ -206,14 +206,35 @@ function connect_events(canvas, s)
     });
 }
 
+// accumulate pixel changes to a single ws command that's send once a second
+class UpdatesQueue {
+    constructor(ws) {
+        this.accum = new Map()
 
+        window.setInterval(()=>{
+            if (this.accum.size == 0)
+                return
+            let cmd = "DP " + this.accum.size
+            for (let [k, c] of this.accum) {
+                cmd += " " + k + " " + c
+            }
+            this.accum.clear()
+            ws.send(cmd)
+        }, 1000)
+    }
+    add(x, y, r, g, b) {
+        const c = color565(r, g, b)
+        this.accum.set("" + x + " " + y, c)
+    }
+}
 
-function draw_pixel_create(root, w, h)
+function draw_pixel_create(root, w, h, ws)
 {
     const top_elem = add_elem(root, 'div', 'draw_top')
     const control_elem = add_elem(top_elem, 'div', 'draw_control')
 
-    const s = new DrawState(top_elem, 'draw_canvas', w, h)
+    const uq = new UpdatesQueue(ws)
+    const s = new DrawState(top_elem, 'draw_canvas', w, h, uq.add.bind(uq))
 
     const clear_but = add_elem(control_elem, 'div', 'button')
     clear_but.innerText = 'Clear'
