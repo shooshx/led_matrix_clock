@@ -14,11 +14,10 @@ class MyAdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks
     {
       Serial.printf("BLE: Advertised Device: %s\n", advertisedDevice->toString().c_str());
       int count = advertisedDevice->getServiceUUIDCount();
-      for(int i = 0; i < count; ++i)
-          Serial.printf("BLE:   Service %d: %s\n", i, advertisedDevice->getServiceUUID(i).toString().c_str());
+
       if(advertisedDevice->isAdvertisingService(NimBLEUUID("1812")))
       {
-          Serial.println("BLE: Found remote, stopping scan");
+          Serial.printf("BLE:   Found remote addr=%s, stopping scan", advertisedDevice->getAddress().toString().c_str());
           /** stop scan before connecting */
           NimBLEDevice::getScan()->stop();
           /** Save the device reference in a global for the client to use*/
@@ -62,7 +61,7 @@ class ClientCallbacks : public NimBLEClientCallbacks {
          *  I find a multiple of 3-5 * the interval works best for quick response/reconnect.
          *  Min interval: 120 * 1.25ms = 150, Max interval: 120 * 1.25ms = 150, 0 latency, 60 * 10ms = 600ms timeout
          */
-        //pClient->updateConnParams(120,120,0,60);
+        pClient->updateConnParams(120,120,0,60);
     };
 
     void onDisconnect(NimBLEClient* pClient) {
@@ -76,7 +75,7 @@ class ClientCallbacks : public NimBLEClientCallbacks {
      *  the currently used parameters. Default will return true.
      */
     bool onConnParamsUpdateRequest(NimBLEClient* pClient, const ble_gap_upd_params* params) {
-        Serial.printf("onConnParams returning true");
+        Serial.printf("BLE: onConnParams returning true\n");
         return true;
     };
 
@@ -202,7 +201,7 @@ void setup() {
 
   //NimBLEDevice::setScanDuplicateCacheSize(200);
 
-  NimBLEDevice::init("");
+  NimBLEDevice::init("myespclient");
 
   NimBLEScan* pBLEScan = NimBLEDevice::getScan(); //create new scan
   // Set the callback for when devices are discovered, no duplicates.
@@ -217,16 +216,6 @@ void setup() {
 
 void loop() {
 
- /* if (g_last_numble_scan == 0 || millis() - g_last_numble_scan > 2000)
-  {
-    // If an error occurs that stops the scan, it will be restarted here.
-    if(NimBLEDevice::getScan()->isScanning() == false) {
-        // Start scan with: duration = 0 seconds(forever), no scan end callback, not a continuation of a previous scan.
-        Serial.println("BLE: starting scan");
-        g_last_numble_scan = millis();
-        
-    }
-  }*/
 
   if (g_do_nimble_connect)
   {
