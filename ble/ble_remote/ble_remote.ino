@@ -8,8 +8,10 @@ bool g_do_nimble_connect = false;
 unsigned long g_last_numble_scan = 0;
 static NimBLEAdvertisedDevice* g_remote_device = nullptr;
 
-class MyAdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
-    void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
+class MyAdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks 
+{
+    void onResult(NimBLEAdvertisedDevice* advertisedDevice) 
+    {
       Serial.printf("BLE: Advertised Device: %s\n", advertisedDevice->toString().c_str());
       int count = advertisedDevice->getServiceUUIDCount();
       for(int i = 0; i < count; ++i)
@@ -31,25 +33,7 @@ void scanEndedCB(NimBLEScanResults results){
     Serial.println("BLE: Scan Ended");
 }
 
-void setup() {
-  Serial.begin(115200);
-  Serial.println("BLE: Scanning...");
 
-  NimBLEDevice::setScanFilterMode(CONFIG_BTDM_SCAN_DUPL_TYPE_DEVICE);
-
-
-  NimBLEDevice::setScanDuplicateCacheSize(200);
-
-  NimBLEDevice::init("");
-
-  NimBLEScan* pBLEScan = NimBLEDevice::getScan(); //create new scan
-  // Set the callback for when devices are discovered, no duplicates.
-  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks(), false);
-  pBLEScan->setActiveScan(true); // Set active scanning, this will get more data from the advertiser.
-  pBLEScan->setInterval(45); // How often the scan occurs / switches channels; in milliseconds,
-  pBLEScan->setWindow(15);  // How long to scan during the interval; in milliseconds.
-  pBLEScan->setMaxResults(0); // do not store the scan results, use callback only.
-}
 
 /** Notification / Indication receiving handler callback */
 void notifyCB(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify)
@@ -82,9 +66,9 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     };
 
     void onDisconnect(NimBLEClient* pClient) {
-         Serial.printf("BLE: Disconnected %s\n", pClient->getPeerAddress().toString().c_str());
+         Serial.printf("BLE: Disconnected %s Starting Scan\n", pClient->getPeerAddress().toString().c_str());
          // don't do here, done in loop
-         //NimBLEDevice::getScan()->start(0, scanEndedCB);
+         NimBLEDevice::getScan()->start(0, scanEndedCB);
     };
 
     /** Called when the peripheral requests a change to the connection parameters.
@@ -92,47 +76,11 @@ class ClientCallbacks : public NimBLEClientCallbacks {
      *  the currently used parameters. Default will return true.
      */
     bool onConnParamsUpdateRequest(NimBLEClient* pClient, const ble_gap_upd_params* params) {
-        if(params->itvl_min < 24) { /** 1.25ms units */
-            Serial.printf("onConnParams returning false 1: %d\n", params->itvl_min);
-            return false;
-        } else if(params->itvl_max > 40) { /** 1.25ms units */
-            Serial.printf("onConnParams returning false 2\n");
-            return false;
-        } else if(params->latency > 2) { /** Number of intervals allowed to skip */
-            Serial.printf("onConnParams returning false 3\n");
-            return false;
-        } else if(params->supervision_timeout > 100) { /** 10ms units */
-            Serial.printf("onConnParams returning false 4\n");
-            return false;
-        }
         Serial.printf("onConnParams returning true");
         return true;
     };
 
-    /********************* Security handled here **********************
-    ****** Note: these are the same return values as defaults ********/
-    uint32_t onPassKeyRequest(){
-        Serial.println("BLE: Client Passkey Request");
-        /** return the passkey to send to the server */
-        return 123456;
-    };
 
-    bool onConfirmPIN(uint32_t pass_key){
-        Serial.print("BLE: The passkey YES/NO number: ");
-        Serial.println(pass_key);
-    /** Return false if passkeys don't match. */
-        return true;
-    };
-
-    /** Pairing process complete, we can check the results in ble_gap_conn_desc */
-    void onAuthenticationComplete(ble_gap_conn_desc* desc){
-        if(!desc->sec_state.encrypted) {
-            Serial.println("BLE: Encrypt connection failed - disconnecting");
-            /** Find the client with the connection handle provided in desc */
-            NimBLEDevice::getClientByID(desc->conn_handle)->disconnect();
-            return;
-        }
-    };
 };
 
 
@@ -151,6 +99,7 @@ bool connect_ble(NimBLEAdvertisedDevice* advDevice)
          */
         pClient = NimBLEDevice::getClientByPeerAddress(advDevice->getAddress());
         if(pClient){
+            Serial.printf("BLE: connect1 %s\n", advDevice->getAddress().toString().c_str());
             if(!pClient->connect(advDevice, false)) {
                 Serial.println("BLE: Reconnect failed");
                 return false;
@@ -186,7 +135,7 @@ bool connect_ble(NimBLEAdvertisedDevice* advDevice)
         /** Set how long we are willing to wait for the connection to complete (seconds), default is 30. */
         pClient->setConnectTimeout(5);
 
-
+        Serial.printf("BLE: connect2 %s\n", advDevice->getAddress().toString().c_str());
         if (!pClient->connect(advDevice)) {
             /** Created a client but failed to connect, don't need to keep it as it has no data */
             NimBLEDevice::deleteClient(pClient);
@@ -196,23 +145,16 @@ bool connect_ble(NimBLEAdvertisedDevice* advDevice)
     }
 
     if(!pClient->isConnected()) {
+        Serial.printf("BLE: connect3 %s\n", advDevice->getAddress().toString().c_str());
         if (!pClient->connect(advDevice)) {
             Serial.println("BLE: Failed to connect");
             return false;
         }
     }
 
-    Serial.print("BLE: Connected to: ");
-    Serial.print(pClient->getPeerAddress().toString().c_str());
-    Serial.print("  RSSI: ");
-    Serial.print(pClient->getRssi());
-    Serial.print("  STR: ");
-    Serial.print(pClient->toString().c_str());
+    Serial.printf("BLE: Connected to: %s  RSSI: %d  STR: %s", pClient->getPeerAddress().toString().c_str(), pClient->getRssi(), pClient->toString().c_str());
 
     /** Now we can read/write/subscribe the charateristics of the services we are interested in */
-
-        //pChr = pSvc->getCharacteristic("F00D");
-        //pDsc = pChr->getDescriptor(NimBLEUUID("C01D"));
         
     NimBLERemoteService* pSvc = pClient->getService("1812");
     if (!pSvc) {
@@ -252,18 +194,39 @@ bool connect_ble(NimBLEAdvertisedDevice* advDevice)
     return true;
 }
 
+void setup() {
+  Serial.begin(115200);
+  Serial.println("BLE: Scanning...");
+
+  //NimBLEDevice::setScanFilterMode(CONFIG_BTDM_SCAN_DUPL_TYPE_DEVICE);
+
+  //NimBLEDevice::setScanDuplicateCacheSize(200);
+
+  NimBLEDevice::init("");
+
+  NimBLEScan* pBLEScan = NimBLEDevice::getScan(); //create new scan
+  // Set the callback for when devices are discovered, no duplicates.
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks(), false);
+  pBLEScan->setActiveScan(true); // Set active scanning, this will get more data from the advertiser.
+  pBLEScan->setInterval(45); // How often the scan occurs / switches channels; in milliseconds,
+  pBLEScan->setWindow(15);  // How long to scan during the interval; in milliseconds.
+  //pBLEScan->setMaxResults(0); // do not store the scan results, use callback only.
+
+  NimBLEDevice::getScan()->start(0, scanEndedCB);
+}
+
 void loop() {
 
-  if (g_last_numble_scan == 0 || millis() - g_last_numble_scan > 2000)
+ /* if (g_last_numble_scan == 0 || millis() - g_last_numble_scan > 2000)
   {
     // If an error occurs that stops the scan, it will be restarted here.
     if(NimBLEDevice::getScan()->isScanning() == false) {
         // Start scan with: duration = 0 seconds(forever), no scan end callback, not a continuation of a previous scan.
         Serial.println("BLE: starting scan");
         g_last_numble_scan = millis();
-        NimBLEDevice::getScan()->start(0, scanEndedCB, false);
+        
     }
-  }
+  }*/
 
   if (g_do_nimble_connect)
   {
