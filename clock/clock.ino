@@ -18,7 +18,7 @@
 
 #include "my_fonts/fonts_index.h"
 #include "ClockState.h"
-#include "strSplit.h"
+#include "base_utils.h"
 
 
 // Replace with your network credentials
@@ -222,7 +222,7 @@ struct PixParse
     int x = 0, y = 0, col = 0;
 
     void operator()(const char* s) {
-        Serial.printf("PP `%s` - %d, %d, %d\n", s, i, state, count);
+        //Serial.printf("PP `%s` - %d, %d, %d\n", s, i, state, count);
         if (i == 0) {
             ++i;  // command
             return;
@@ -242,7 +242,7 @@ struct PixParse
             Serial.printf("PP-draw %d,%d, %d\n", x, y, col);
             ++count;
         }
-        ++state;
+        state = (state + 1) % 3;
         ++i;
     }
 };
@@ -252,7 +252,7 @@ void parse_pixel_cmd(String& line)
     PixParse pp;
     strSplitStream(line, pp);
     if (pp.count != pp.expect_count)
-        Serial.printf("draw command parsed unexpected number of pixels %d, %d\n", pp.i, pp.expect_count);
+        Serial.printf("draw command parsed unexpected number of pixels %d, %d\n", pp.count, pp.expect_count);
 }
 
 
@@ -265,11 +265,13 @@ void handleWebSocketMessage(uint8_t *data, size_t len) {
     String line(&v[0]);
     Serial.printf("WebSocket data `%s`\n", line.c_str());
 
-    int count = strSplit(line, sp, 3);
-    if (count == 0)
+    if (line.length() < 2)
         return;
-    if (sp[0] == "U")
+    char cmd = line[0];
+    char subcmd = line[1];
+    if (cmd == 'U')
     {
+        int count = strSplit(line, sp, 3);
         if (count != 3) {
             Serial.printf("Unexpected number of args of UC %d\n", count);
             return;
@@ -279,9 +281,12 @@ void handleWebSocketMessage(uint8_t *data, size_t len) {
             state->save();
         }
     }
-    else if (sp[0] == "DP")
+    else if (cmd == 'D')
     {
-        parse_pixel_cmd(line);        
+        if (subcmd == 'P')
+            parse_pixel_cmd(line);        
+        else
+            Serial.printf("Unknown subcmd %s\n", sp[0].c_str());
     }
     else
     {
@@ -487,7 +492,6 @@ void setup(void)
   setupNtp();
   setupWeb();
 
-  
   setupDisplay();
 }
 
@@ -503,24 +507,29 @@ bool updateTime()
 
 
 
+int g_loop_count = 0;
+int g_last_count = 0;
+
 void loop(void){
+  ++g_loop_count;
   // MDNS.update(); not needed?
   
   bool timeChanged = updateTime(); // TODO: needed this often?
 
   if (timeChanged && state->top.active_section.get() == SECTION_CLOCK)
   {
-    //unsigned long start_time=micros();
+    Timer t;
     
     time_t utc = epochTime;
     time_t local = utc + tzOffset * 3600;
     if (has_display)
     {
         state->clock_state.draw(local);
+        display.drawPixel(0, epochTime % 32, 0xffff);
     }
-    //unsigned long elapsed = micros() - start_time;
-    //Serial.print("draw took ");
-    //Serial.println(elapsed);
+
+    //Serial.printf("draw took %d loops:%d\n", t.elapsed(), g_loop_count - g_last_count);
+    g_last_count = g_loop_count;
 
   }
 

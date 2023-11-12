@@ -1,5 +1,6 @@
 #pragma once
 #include "Prop.h"
+#include "base_utils.h"
 
 extern PxMATRIX display;
 
@@ -24,13 +25,17 @@ struct TextBlock : public PropHolder<4>
      
     void draw(const String& text)
     {
+        Timer t;
         if (m_font_index.get() < 0 || m_font_index.get() > sizeof(all_fonts)/sizeof(all_fonts[0]) )
             display.setFont(nullptr);
         else
             display.setFont(all_fonts[m_font_index.get()].fontPtr);
         display.setTextColor(m_color.get());
         display.setCursor(m_x.get(), m_y.get());
+        auto ts = t.restart();
         display.print(text);
+        auto tp = t.restart();
+        //printf("    text took %d, %d\n", ts, tp);
     }
     
 };
@@ -60,7 +65,7 @@ struct ClockPanel : public PropHolder<5>
       , m_show_sec(this, name + "_show_sec", true)
       , m_show_day(this, name + "_show_day", false)
     {
-        //Serial.println("ClockPanel ctor");
+        Serial.println("ClockPanel ctor");
         m_text2.m_y.set(16);
     }
 
@@ -106,11 +111,16 @@ struct ClockPanel : public PropHolder<5>
 
     void draw(time_t localTime)
     {
+        Timer t;
         display.clearDisplay();
+        auto tc = t.restart();
         //display.fillScreen(m_back_color.get());
         time_to_strings(localTime);
+        auto ts = t.restart();
         m_text1.draw(m_cur_time);
         m_text2.draw(m_cur_date);
+        auto td = t.restart();
+        //printf("  clock took %d, %d, %d\n", tc, ts, td);
     }
 
 };
