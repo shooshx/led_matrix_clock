@@ -530,6 +530,7 @@ inline void PxMATRIX::drawPixelRGB565(int16_t x, int16_t y, uint16_t color) {
   uint8_t r = ((((color >> 11) & 0x1F) * 527) + 23) >> 6;
   uint8_t g = ((((color >> 5) & 0x3F) * 259) + 33) >> 6;
   uint8_t b = (((color & 0x1F) * 527) + 23) >> 6;
+  //Serial.printf("drawPixel %d, %d, %d\n", r, g, b);
 #ifdef PxMATRIX_DOUBLE_BUFFER
   fillMatrixBuffer(x, y, r, g, b, !_active_buffer);
 #else

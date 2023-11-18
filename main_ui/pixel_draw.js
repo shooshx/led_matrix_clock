@@ -5,7 +5,7 @@ const DRAW_PIXEL_SIZE = 20
 
 class DrawState extends GfxCanvas
 {
-    constructor(parent_elem, canvas_name, w, h, pixel_color_cb)
+    constructor(parent_elem, canvas_name, w, h, cmd_cb)
     {
         super(w, h, DRAW_PIXEL_SIZE, parent_elem, DRAW_LINE_WIDTH, canvas_name)
 
@@ -17,7 +17,7 @@ class DrawState extends GfxCanvas
         this.tool_color = ColorPicker.parse_hex(localStorage['draw_cur_color'] || '#22AACC')
 
         this.tool_pradius = this.tool_radius * this.PIXEL_SIZE
-        this.pixel_color_cb = pixel_color_cb
+        this.cmd_cb = cmd_cb
         
         //for(let i = 0; i < this.pixels.length; ++i)
         //    this.pixels[i] = 0
@@ -48,7 +48,7 @@ class DrawState extends GfxCanvas
         this.pixels[i+2] = nb
         this.pixels[i+3] = na * 255;
 
-        this.pixel_color_cb(x, y, nr * na, ng * na, nb * na)
+        this.cmd_cb.add(x, y, Math.trunc(nr * na), Math.trunc(ng * na), Math.trunc(nb * na))
     }
 
     draw_cavnvas()
@@ -109,6 +109,7 @@ class DrawState extends GfxCanvas
         for(let i = 0; i < this.pixels.length; ++i)
             this.pixels[i] = 0
         this.draw_cavnvas()
+        this.cmd_cb.clear()
     }
 
     tool(x, y, px, py, do_step, act) {
@@ -210,21 +211,38 @@ function connect_events(canvas, s)
 class UpdatesQueue {
     constructor(ws) {
         this.accum = new Map()
+        this.ws = ws
 
         window.setInterval(()=>{
             if (this.accum.size == 0)
                 return
-            let cmd = "DP " + this.accum.size
+            const cmd = new Uint8Array(this.accum.size * 5 + 4 + 2)
+            let offset = 0
+            cmd[offset++] = 'D'.charCodeAt(0)
+            cmd[offset++] = 'P'.charCodeAt(0)
+            const count_buf = new Uint32Array(1)
+            count_buf[0] = this.accum.size
+            const count_bufb = new Uint8Array(count_buf.buffer, 0, 4)
+            for(let i = 0; i < 4; ++i)
+                cmd[offset++] = count_bufb[i]
+            
+            //let cmd = "DP " + this.accum.size
             for (let [k, c] of this.accum) {
-                cmd += " " + k + " " + c
+                //cmd += " " + k + " " + c
+                for(let i = 0; i < 5; ++i)
+                    cmd[offset++] = c[i];
             }
             this.accum.clear()
             ws.send(cmd)
-        }, 1000)
+            console.log("sent " + offset + " bytes")
+        }, 500)
     }
     add(x, y, r, g, b) {
-        const c = color565(r, g, b)
-        this.accum.set("" + x + " " + y, c)
+        this.accum.set("" + x + " " + y, [x, y, r, g, b])
+    }
+    clear() {
+        this.accum.clear()
+        this.ws.send("DC")
     }
 }
 
@@ -234,7 +252,7 @@ function draw_pixel_create(root, w, h, ws)
     const control_elem = add_elem(top_elem, 'div', 'draw_control')
 
     const uq = new UpdatesQueue(ws)
-    const s = new DrawState(top_elem, 'draw_canvas', w, h, uq.add.bind(uq))
+    const s = new DrawState(top_elem, 'draw_canvas', w, h, uq)
 
     const clear_but = add_elem(control_elem, 'div', 'button')
     clear_but.innerText = 'Clear'

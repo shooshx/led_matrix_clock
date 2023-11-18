@@ -14,7 +14,8 @@
 #include <Preferences.h>
 
 #include <ArduinoJson.h>
-#include <PxMatrix.h>
+//#include <PxMatrix.h>
+#include "myPxMatrix.h"
 
 #include "my_fonts/fonts_index.h"
 #include "ClockState.h"
@@ -188,10 +189,13 @@ void connectWifi()
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-  if(!MDNS.begin("myesp32"))
+  if(!MDNS.begin("myesp32clock"))
     Serial.println("Error starting mDNS");
   else
     Serial.println("mDNS responder started");
+  
+  if (!MDNS.addService("http", "tcp", 80))
+    Serial.println("MDNS addService failed");
   
 }
 
@@ -247,7 +251,7 @@ struct PixParse
     }
 };
 
-void parse_pixel_cmd(String& line)
+void parse_pixel_cmd_t(String& line)
 {
     PixParse pp;
     strSplitStream(line, pp);
@@ -255,15 +259,47 @@ void parse_pixel_cmd(String& line)
         Serial.printf("draw command parsed unexpected number of pixels %d, %d\n", pp.count, pp.expect_count);
 }
 
+struct PixelDat {
+  uint8_t x;
+  uint8_t y;
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+};
 
-void handleWebSocketMessage(uint8_t *data, size_t len) {
+void parse_pixel_cmd(std::vector<char> v)
+{
+  //Serial.printf("parse_pixel %d\n", v.size());
+  if (v.size() < 6) {
+    Serial.printf("pixel_cmd unexpected size %d\n", v.size());
+    return;
+  }
+  uint32_t sz = 0;
+  memcpy(&sz, &v[2], sizeof(uint32_t));
+  if (v.size() != sz*5 + 6 + 1) { // +1 for null term that's added on parsing
+    Serial.printf("pixel_cmd unexpected size2 %d, %d\n", v.size(), sz);
+    return;
+  }
+  int offset = 6;
+  for(int i = 0; i < sz; ++i) {
+    PixelDat* p = (PixelDat*)&v[offset];
+    offset += 5;
+    display.drawPixelRGB888(p->x, p->y, p->r, p->g, p->b);
+    //Serial.printf("PP-draw %d,%d, %x-%x-%x\n", p->x, p->y, p->r, p->g, p->b);
+  }
+  
+  
+}
+
+void handleWebSocketMessage(uint8_t *data, size_t len) 
+{
+    //Serial.printf("WebSocket data %d\n", len);
     std::vector<char> v;
     v.resize(len + 1);
     memcpy(&v[0], data, len);
     v[len] = 0;
     String sp[3];
     String line(&v[0]);
-    Serial.printf("WebSocket data `%s`\n", line.c_str());
 
     if (line.length() < 2)
         return;
@@ -276,7 +312,7 @@ void handleWebSocketMessage(uint8_t *data, size_t len) {
             Serial.printf("Unexpected number of args of UC %d\n", count);
             return;
         }
-        //Serial.printf("prop update %s %d\n", sp[1].c_str(), sp[2].toInt());
+        Serial.printf("prop update %s %d\n", sp[1].c_str(), sp[2].toInt());
         if (state->update_prop(sp[1], sp[2].toInt())) {
             state->save();
         }
@@ -284,7 +320,10 @@ void handleWebSocketMessage(uint8_t *data, size_t len) {
     else if (cmd == 'D')
     {
         if (subcmd == 'P')
-            parse_pixel_cmd(line);        
+            parse_pixel_cmd(v);        
+        else if (subcmd == 'C') {
+            display.clearDisplay();
+        }
         else
             Serial.printf("Unknown subcmd %s\n", sp[0].c_str());
     }
@@ -305,7 +344,8 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
       break;
     case WS_EVT_DATA: {
       AwsFrameInfo *info = (AwsFrameInfo*)arg;
-      if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+      //Serial.printf("WS event final=%d, index=%d, len=%d(%d), opcode=%d\n", (int)info->final, (int)info->index, (int)info->len, (int)len, (int)info->opcode);
+      if (info->final && info->index == 0 && info->len == len && (info->opcode == WS_TEXT || info->opcode == WS_BINARY)) {
           handleWebSocketMessage(data, len);
       }
       break;
@@ -385,6 +425,7 @@ void setupWeb()
 // from https://github.com/2dom/PxMatrix/issues/225
 #define CORE_1 1
 TaskHandle_t displayUpdateTaskHandle = NULL;
+
 hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -402,14 +443,16 @@ void IRAM_ATTR display_updater()
   }
   portEXIT_CRITICAL_ISR(&timerMux);
 }
+
  
 void displayUpdateTask(void *)
 {
   for(;;){
     //block here untill timer ISR unblocks task
-    if (ulTaskNotifyTake( pdTRUE, portMAX_DELAY)){
+    //if (ulTaskNotifyTake( pdTRUE, portMAX_DELAY)){
         display.display(70);
-    }
+        vTaskDelay( 1 );
+    //}
   }
 }
 
@@ -424,29 +467,14 @@ void setupDisplayISR()
     3, /* Highest priority so it is immediately launched on context switch after the ISR */
     &displayUpdateTaskHandle, /* Task handle to use for task notification */
     CORE_1);
-
+#if 0
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, &display_updater, true);
   timerAlarmWrite(timer, 4000, true);
   timerAlarmEnable(timer);
+#endif
 }
 
-
-void IRAM_ATTR display_updater_old(){
-  // Increment the counter and set the time of ISR
-  portENTER_CRITICAL_ISR(&timerMux);
-  display.display(70);
-  //display.displayTestPattern(70);
-  portEXIT_CRITICAL_ISR(&timerMux);
-}
-
-void setupDisplayISR_old()
-{
-  timer = timerBegin(0, 80, true);
-  timerAttachInterrupt(timer, &display_updater_old, true);
-  timerAlarmWrite(timer, 4000, true);
-  timerAlarmEnable(timer);
-}
 
 
 
@@ -512,7 +540,6 @@ int g_last_count = 0;
 
 void loop(void){
   ++g_loop_count;
-  // MDNS.update(); not needed?
   
   bool timeChanged = updateTime(); // TODO: needed this often?
 
@@ -528,7 +555,7 @@ void loop(void){
         display.drawPixel(0, epochTime % 32, 0xffff);
     }
 
-    //Serial.printf("draw took %d loops:%d\n", t.elapsed(), g_loop_count - g_last_count);
+    Serial.printf("draw took %d loops:%d\n", t.elapsed(), g_loop_count - g_last_count);
     g_last_count = g_loop_count;
 
   }

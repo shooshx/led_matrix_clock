@@ -79,6 +79,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """Handle requests in a separate thread."""
     pass
 
+# go to main_ui and run python ..\py_server\main.py 80
 
 def main():
     global g_pref_dict

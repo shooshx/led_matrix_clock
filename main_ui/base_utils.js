@@ -43,7 +43,7 @@ class GfxCanvas
         this.image_data = this.shadow_ctx.getImageData(0, 0, this.width, this.height)
         this.pixels = this.image_data.data
 
-        this.pixel_color_cb = null
+        this.cmd_cb = null
     }
 
     setPixel(x, y, r, g, b)
@@ -55,8 +55,8 @@ class GfxCanvas
         this.pixels[i+1] = g
         this.pixels[i+2] = b
         this.pixels[i+3] = 255;
-        if (this.pixel_color_cb != null)
-            this.pixel_color_cb(x, y, r, g, b)
+        if (this.cmd_cb != null)
+            this.cmd_cb.add(x, y, r, g, b)
     }
 
     draw()
