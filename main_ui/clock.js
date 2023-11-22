@@ -8,7 +8,8 @@ class ClockPanel
         this.text2 = new TextBlock(name + "_t2", pref_json, pref_update, "Fri 20/10/2023", -1, 0, 20)
         this.show_seconds = NumProp.from_json(name + "_show_sec", pref_json)
         this.show_day = NumProp.from_json(name + "_show_day", pref_json)
-        this.back_color = ColorProp.from_json(name + "_back_col", pref_json)
+        //this.back_color = ColorProp.from_json(name + "_back_col", pref_json)
+        this.offset = NumProp.from_json("tz_offset", pref_json)
     }
 
     start_time(display_cb) {
@@ -18,7 +19,10 @@ class ClockPanel
 
     update_time(display_cb)
     {
-        const d = new Date()
+        const ld = new Date()
+        const utc = ld.getTime()
+        const d = new Date(utc + 3600000*this.offset.v + ld.getTimezoneOffset()*60000)
+
         let min = d.getMinutes()
         if (min < 10)
             min = "0" + min
@@ -60,17 +64,22 @@ class ClockPanel
             this.update_time(display_cb)
         })
 
-        const col_in = add_elem(col2, 'input', 'clock_col_in')
+        /*const col_in = add_elem(col2, 'input', 'clock_col_in')
         col_in.setAttribute('readonly', true)
         ColorEditBox.create_at(col_in, 300, (c)=>{ 
             this.back_color.set_and_update(c, pref_update) 
             display_cb()
         }, {}, ColorPicker.make_hex(this.back_color, true))
+        */
+        add_num_input(col2, "Offset\n", this.offset.v, (value)=>{
+            this.offset.set_and_update(value, pref_update)
+            this.update_time(display_cb)
+        })
     }
 
     draw(gfx)
     {
-        gfx.set_back_col(this.back_color.r, this.back_color.g, this.back_color.b)
+        //gfx.set_back_col(this.back_color.r, this.back_color.g, this.back_color.b)
         this.text1.draw(gfx)
         this.text2.draw(gfx)
     }
@@ -98,6 +107,157 @@ function clock_create(parent, pref_json, ws)
 
     panel.add_ui(ctrl, display, send_update)
     panel.start_time(display)
+
+    display()
+}
+
+// ---------------------------------------------------------------------------------------------------------
+
+class TimerPanel
+{
+}
+
+function timer_create(parent, pref_json, ws)
+{
+}
+
+
+// ---------------------------------------------------------------------------------------------------------
+
+class MemImage
+{
+    constructor(w, h) {
+        this.d_rgb = new Uint8Array(w * h * 3)
+        this.w = w
+        this.h = h
+    }
+    set(x, y, r, g, b) {
+        if (x < 0 || y < 0 || x >= this.w || y >= this.h)
+            return
+        const i = (x + y * this.w) * 3
+        this.d_rgb[i] = r
+        this.d_rgb[i+1] = g
+        this.d_rgb[i+2] = b
+    }
+    get(x, y) {
+        const i = (x + y * this.w) * 3
+        return [this.d_rgb[i], this.d_rgb[i + 1], this.d_rgb[i + 2]]
+    }
+}
+
+class LinearGradient
+{
+    constructor(col1, coord1, col2, coord2, w)
+    {
+        this.color1 = col1
+        this.color2 = col2
+        this.coord1 = coord1
+        this.coord2 = coord2
+        this.width = w
+    }
+    
+    add_ui(ctrl, display_cb, send_update_cb)
+    {   
+        const ctrl_line1 = add_elem(ctrl, 'div', 'ctrl_line')
+        const col1_in = add_elem(ctrl_line1, 'input', 'clock_col_in')
+        ColorEditBox.create_at(col1_in, 300, (c)=>{ 
+            this.color1 = {r:c.r, g:c.g, b:c.b}
+            display_cb()
+            send_update_cb()
+        }, {}, ColorPicker.make_hex(this.color1, true))
+
+        const col2_in = add_elem(ctrl_line1, 'input', 'clock_col_in')
+        ColorEditBox.create_at(col2_in, 300, (c)=>{ 
+            this.color2 = {r:c.r, g:c.g, b:c.b}
+            display_cb()
+            send_update_cb()
+        }, {}, ColorPicker.make_hex(this.color2, true))
+    }
+
+    add_to_image(img)
+    {
+        const levels = (this.coord2.x - this.coord1.x)
+        const d_r = (this.color2.r - this.color1.r) / levels
+        const d_g = (this.color2.g - this.color1.g) / levels
+        const d_b = (this.color2.b - this.color1.b) / levels
+        for(let i = 0; i <= levels; ++i) {
+            const r = this.color1.r + i*d_r
+            const g = this.color1.g + i*d_g
+            const b = this.color1.b + i*d_b
+            const x = this.coord1.x + i
+            for(let j = 0; j < this.width; ++j) {
+                const y = this.coord1.y + j
+                img.set(x, y, r, g, b)
+            }
+        }
+    }
+
+}
+class DImgPanel
+{
+    constructor()
+    {
+        this.objs = [  new LinearGradient({r:255, g:0, b:0}, {x:0, y:0}, {r:0, g:0, b:0}, {x:63, y:0}, 10),
+                       new LinearGradient({r:0, g:255, b:0}, {x:0, y:10}, {r:0, g:0, b:0}, {x:63, y:10}, 10), 
+                       new LinearGradient({r:0, g:0, b:255}, {x:0, y:20}, {r:0, g:0, b:0}, {x:63, y:20}, 10)
+        ]
+        this.img = null
+    }
+    make_image(w, h) {
+        this.img = new MemImage(w, h) 
+        for(let obj of this.objs)
+            obj.add_to_image(this.img)
+        
+    }
+    add_ui(ctrl, display_cb, send_update) {
+        for(let obj of this.objs)
+            obj.add_ui(ctrl, display_cb, send_update)
+    }
+    draw(gfx, w, h)
+    {
+        this.make_image(w, h)
+        let i = 0;
+        for(let x = 0; x < w; ++x)
+            for(let y = 0; y < h; ++y) {
+                const [r, g, b] = this.img.get(x, y)
+                gfx.setPixel(x, y, r, g, b)
+            }
+    }
+}
+
+function draw_image_create(parent, width, height, ws)
+{
+    const dimg = add_elem(parent, 'div', 'dimg_top')
+    const ctrl = add_elem(dimg, 'div', 'dimg_ctrl')
+    const disp = add_elem(dimg, 'div', 'dimg_disp')
+    const dimg_canvas = new GfxCanvas(width, height, 5, disp, 0, 'dimg_canvas')
+    Module.gfx_init_display(dimg_canvas, width, height)
+
+    let panel = new DImgPanel()
+    let last_img = null
+
+    window.setInterval(()=>{
+        if (last_img === null)
+            return
+        const sz = last_img.w * last_img.h
+        let [cmd, offset] = make_buf_cmd('DI', sz, 3)
+        for(let i = 0; i < sz * 3; ++i)
+            cmd[offset++] = last_img.d_rgb[i]
+        last_img = null;
+        ws.send(cmd)
+        console.log("sent DI " + offset + " bytes")
+    }, 500)
+
+    const display = ()=>{
+        dimg_canvas.gfx.clear()
+        panel.draw(dimg_canvas, width, height)
+        dimg_canvas.draw()        
+    }
+    const send_update = ()=>{
+        last_img = panel.img
+    }
+
+    panel.add_ui(ctrl, display, send_update)
 
     display()
 }

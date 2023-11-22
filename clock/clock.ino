@@ -40,6 +40,8 @@ NTPClient timeClient(ntpUDP);
 unsigned long epochTime;
 int tzOffset = +3;
 
+#define DISPLAY_WIDTH 64
+#define DISPLAY_HEIGHT 32
 
 #define P_LAT 22
 #define P_A 19
@@ -49,13 +51,17 @@ int tzOffset = +3;
 #define P_E 15
 #define P_OE 2
 
-PxMATRIX display(64,32,P_LAT, P_OE,P_A,P_B,P_C,P_D);
+PxMATRIX display(DISPLAY_WIDTH,DISPLAY_HEIGHT,P_LAT, P_OE,P_A,P_B,P_C,P_D);
 bool has_display = false;
 bool has_serial = false;
 
 enum Section {
-    SECTION_CLOCK = 0,
-    SECTION_DRAW = 1
+    SECTION_OFF = 0,
+    SECTION_CLOCK = 1,
+    SECTION_TIMER = 2,
+    SECTION_STOPPER = 3,
+    SECTION_DRAW = 4,
+    SECTION_IMAGE = 5
 };
 
 class TopState : public PropHolder<1>
@@ -267,7 +273,7 @@ struct PixelDat {
   uint8_t b;
 };
 
-void parse_pixel_cmd(std::vector<char> v)
+void parse_pixel_cmd(const std::vector<uint8_t>& v)
 {
   //Serial.printf("parse_pixel %d\n", v.size());
   if (v.size() < 6) {
@@ -287,33 +293,67 @@ void parse_pixel_cmd(std::vector<char> v)
     display.drawPixelRGB888(p->x, p->y, p->r, p->g, p->b);
     //Serial.printf("PP-draw %d,%d, %x-%x-%x\n", p->x, p->y, p->r, p->g, p->b);
   }
-  
-  
 }
 
-void handleWebSocketMessage(uint8_t *data, size_t len) 
+void parse_img_cmd(const std::vector<uint8_t>& v)
 {
-    //Serial.printf("WebSocket data %d\n", len);
-    std::vector<char> v;
+  if (v.size() < 6) {
+    Serial.printf("img_cmd unexpected size %d\n", v.size());
+    return;
+  }
+  uint32_t sz = 0;
+  memcpy(&sz, &v[2], sizeof(uint32_t));
+  if (v.size() != sz*3 + 6 + 1) { // +1 for null term that's added on parsing
+    Serial.printf("img_cmd unexpected size2 %d, %d\n", v.size(), sz);
+    return;
+  }
+  if (sz != DISPLAY_WIDTH * DISPLAY_HEIGHT) {
+    Serial.printf("img_cmd wrong size3 %d, %d, %d\n", sz, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    return;
+  }
+  int offset = 6;
+  int x = 0, y = 0;
+  for(int i = 0; i < sz; ++i) {
+    display.drawPixelRGB888(x, y, v[offset], v[offset+1], v[offset+2]);
+    offset += 3;
+    ++x;
+    if (x >= DISPLAY_WIDTH) {
+      x = 0;
+      ++y;
+    }
+  }
+  //Serial.printf("img_cmd done %d\n", sz);
+}
+
+
+void handleWebSocketMessage(const uint8_t *data, size_t len) 
+{
+    //Serial.printf("WebSocket data %d\n", (int)len);
+    std::vector<uint8_t> v;
     v.resize(len + 1);
     memcpy(&v[0], data, len);
     v[len] = 0;
-    String sp[3];
-    String line(&v[0]);
 
-    if (line.length() < 2)
+    if (v.size() < 2) {
+        Serial.printf("data too short %d\n", (int)v.size());
         return;
-    char cmd = line[0];
-    char subcmd = line[1];
+    }
+
+    char cmd = (char)v[0];
+    char subcmd = (char)v[1];
     if (cmd == 'U')
     {
+        String sp[3];
+        String line((char*)&v[0]);
+    
         int count = strSplit(line, sp, 3);
         if (count != 3) {
             Serial.printf("Unexpected number of args of UC %d\n", count);
             return;
         }
-        Serial.printf("prop update %s %d\n", sp[1].c_str(), sp[2].toInt());
-        if (state->update_prop(sp[1], sp[2].toInt())) {
+        int v = sp[2].toInt();
+        Serial.printf("prop update %s %d\n", sp[1].c_str(), v);
+        if (state->update_prop(sp[1], v)) {
             state->save();
         }
     }
@@ -321,17 +361,36 @@ void handleWebSocketMessage(uint8_t *data, size_t len)
     {
         if (subcmd == 'P')
             parse_pixel_cmd(v);        
-        else if (subcmd == 'C') {
+        else if (subcmd == 'C') 
             display.clearDisplay();
-        }
+        else if (subcmd == 'I')
+            parse_img_cmd(v);
         else
-            Serial.printf("Unknown subcmd %s\n", sp[0].c_str());
+            Serial.printf("Unknown subcmd %c\n", subcmd);
     }
     else
     {
-        Serial.printf("Unknown command %s\n", sp[0].c_str());
+        Serial.printf("Unknown command %c\n", cmd);
     }
 }
+
+struct FragmentCombine
+{
+  std::vector<uint8_t> m_d;
+
+  int add(uint8_t* data, size_t len, int index) {
+    if (index == 0)
+      m_d.clear();
+    if (index != m_d.size()) {
+      Serial.printf("FRAG: Unexpected index %d,%d\n", index, m_d.size());
+      return 0;
+    }
+    int at_index = m_d.size();
+    m_d.resize(m_d.size() + len);
+    memcpy(&m_d[at_index], data, len);
+    return (int)m_d.size();
+  }
+} g_frag;
 
 
 void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
@@ -344,9 +403,17 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
       break;
     case WS_EVT_DATA: {
       AwsFrameInfo *info = (AwsFrameInfo*)arg;
-      //Serial.printf("WS event final=%d, index=%d, len=%d(%d), opcode=%d\n", (int)info->final, (int)info->index, (int)info->len, (int)len, (int)info->opcode);
-      if (info->final && info->index == 0 && info->len == len && (info->opcode == WS_TEXT || info->opcode == WS_BINARY)) {
+      //Serial.printf("WS event final=%d, num=%d, index=%d, len=%d(%d), opcode=%d,%d\n", (int)(info->final ? 1 : 0), (int)info->num, (int)info->index, (int)info->len, (int)len, (int)info->opcode, (int)info->message_opcode);
+      if (len != info->len) {
+          auto total_len = g_frag.add(data, len, info->index);
+          if (total_len == info->len)
+            handleWebSocketMessage(g_frag.m_d.data(), g_frag.m_d.size());
+      }
+      else if (info->final && info->index == 0 && info->len == len && (info->opcode == WS_TEXT || info->opcode == WS_BINARY)) {
           handleWebSocketMessage(data, len);
+      }
+      else {
+          Serial.printf("Unhandled WS event\n");
       }
       break;
     }
@@ -410,14 +477,7 @@ void setupWeb()
         //Handle Unknown Request
         request->send(404);
     });
-#if 0
-    server.onFileUpload([](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
-       //Handle upload
-    });
-    server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-       //Handle body
-    });
-#endif
+
     
     server.begin();
 }
@@ -449,10 +509,10 @@ void displayUpdateTask(void *)
 {
   for(;;){
     //block here untill timer ISR unblocks task
-    //if (ulTaskNotifyTake( pdTRUE, portMAX_DELAY)){
+    if (ulTaskNotifyTake( pdTRUE, portMAX_DELAY)){
         display.display(70);
-        vTaskDelay( 1 );
-    //}
+        //vTaskDelay( 1 );
+    }
   }
 }
 
@@ -467,7 +527,7 @@ void setupDisplayISR()
     3, /* Highest priority so it is immediately launched on context switch after the ISR */
     &displayUpdateTaskHandle, /* Task handle to use for task notification */
     CORE_1);
-#if 0
+#if 1
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, &display_updater, true);
   timerAlarmWrite(timer, 4000, true);
@@ -552,7 +612,8 @@ void loop(void){
     if (has_display)
     {
         state->clock_state.draw(local);
-        display.drawPixel(0, epochTime % 32, 0xffff);
+        // time passing indicator pixel
+        //display.drawPixel(0, epochTime % 32, 0xffff);
     }
 
     Serial.printf("draw took %d loops:%d\n", t.elapsed(), g_loop_count - g_last_count);

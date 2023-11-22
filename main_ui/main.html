@@ -7,7 +7,6 @@
 <script src="base_utils.js"></script>
 <script src="ColorPicker.js"></script>
 <script src="pixel_draw.js"></script>
-<script src="asm_gfx.js"></script>
 <script src="clock.js"></script>
 <script>
 
@@ -21,62 +20,92 @@ function page_onload()
     //draw_pixel_onload(body, PX_WIDTH, PX_HEIGHT)
 }
 
-let ws_ref = null
+const DISCONNECTED = 0
+const CONNECTING = 1
+const CONNECTED = 2
 
-function ws_connect()
-{
-    let url = ""
-    if (window.location.protocol == "https:")
-        url = "wss://"
-    else
-        url = "ws://"
-    url += window.location.host
-    if (window.location.port.length > 0)
-        url += ":" + window.location.port
-    url += "/ws"
-    console.log("ws url: ", url)
-
-    //url = "ws://localhost"
-
-    const ws = new WebSocket(url) //, "cmdss")
-    ws_ref = ws
-    ws.addEventListener("open", (e)=>{
-        //socket.send("Hello Server!")
-        console.log("WS connected")
-    })
-
-    ws.addEventListener("message", (e)=>{
-        console.log("WS mesg:", e.data)
-    })
-
-    ws.addEventListener("error", (e)=>{
-        console.log("WS error:", e, " b ", JSON.stringify(e), " c ", ws.readyState, " d ", JSON.stringify(ws))
-    })
-    ws.addEventListener("close", (e)=>{
-        console.log("WS close:", e, " a ", e.code, " b ", JSON.stringify(e))
-    })
-
-    const send = (cmd)=>{
+class WsWrap {
+    constructor() {
+        this.ws = null
+        this.state = DISCONNECTED
+        this.send_q = []
+    }
+    send(v) 
+    {
+        if (this.state != CONNECTED) {
+            this.send_q.push(v)
+            if (this.state == DISCONNECTED)
+                this.connect()
+            return
+        }
         try {
-            ws.send(cmd)
+            this.ws.send(v)
         }
         catch(e) {
             console.log(e)
         }
     }
 
-    return { send:send }
+    connect() 
+    {
+        let url = ""
+        if (window.location.protocol == "https:")
+            url = "wss://"
+        else
+            url = "ws://"
+        url += window.location.host
+        if (window.location.port.length > 0)
+            url += ":" + window.location.port
+        url += "/ws"
+        console.log("ws url: ", url)
+
+        //url = "ws://localhost"
+
+        const ws = new WebSocket(url) //, "cmdss")
+        this.ws = ws
+        this.state = CONNECTING
+        ws.addEventListener("open", (e)=>{
+            //socket.send("Hello Server!")
+            console.log("WS connected q:", this.send_q.length)
+            this.state = CONNECTED
+            if (this.send_q.length > 0) {
+                const sq = this.send_q
+                this.send_q = []
+                for(let msg of sq)
+                    this.send(msg)
+            }
+        })
+
+        ws.addEventListener("message", (e)=>{
+            console.log("WS mesg:", e.data)
+        })
+
+        ws.addEventListener("error", (e)=>{
+            console.log("WS error:", e, " b ", JSON.stringify(e), " c ", ws.readyState, " d ", JSON.stringify(ws))
+            this.ws.close()
+            this.state = DISCONNECTED
+        })
+        ws.addEventListener("close", (e)=>{
+            console.log("WS close:", e, " a ", e.code, " b ", JSON.stringify(e))
+            this.ws.close()
+            this.state = DISCONNECTED
+        })
+
+    }
 }
+const ws_wrap = new WsWrap()
+
 
 const sections = []
 
-function create_section(parent, text, init_vis, send_update)
+function create_section(parent, text, active_section, send_update)
 {
     const cont = add_elem(parent, 'div', 'section_cont')
     const header = add_elem(cont, 'div', 'section_hdr')
     header.innerText = text
     const e = add_elem(cont, 'div', 'section_elem')
     const my_index = sections.length
+    const init_vis = (active_section == my_index)
     header.addEventListener('click', ()=>{
         for(let s of sections) {
             if (s.e !== e) {
@@ -94,36 +123,52 @@ function create_section(parent, text, init_vis, send_update)
     return e
 }
 
-function create_ui(prefJson, ws)
+function create_ui(prefJson)
 {
     const active_section = prefJson['active_section'] || 0
     const send_update = (name, value)=>{
         const cmd = "U " + name + " " + value
-        ws.send(cmd)
+        ws_wrap.send(cmd)
+    }
+    const send_off_update = (name, value)=>{
+        send_update(name, value)
+        ws_wrap.send("DC")
     }
 
-    const clk_e = create_section(body, 'Clock', active_section == 0, send_update)
-    clock_create(clk_e, prefJson, ws)
-    const draw_e = create_section(body, 'Draw', active_section == 1, send_update)
-    draw_pixel_create(draw_e, PX_WIDTH, PX_HEIGHT, ws)
+    const off_e = create_section(body, 'Off', active_section, send_off_update)
+    const clk_e = create_section(body, 'Clock', active_section, send_update)
+    clock_create(clk_e, prefJson, ws_wrap)
+    const timer_e = create_section(body, "Timer", active_section, send_update)
+    timer_create(timer_e, prefJson, ws_wrap)
+
+    const stopper_e = create_section(body, "Stop Watch", active_section, send_update)
+
+    const draw_e = create_section(body, 'Draw', active_section, send_update)
+    draw_pixel_create(draw_e, PX_WIDTH, PX_HEIGHT, ws_wrap)
+
+    const img_e = create_section(body, 'Image', active_section, send_update)
+    draw_image_create(img_e, PX_WIDTH, PX_HEIGHT, ws_wrap)
 }
 
 function rt_start()
 {
-    const ws = ws_connect()
+    ws_wrap.connect()
 
     download("/pref?t=" + new Date().getTime(), (resText)=>{
         const prefJson = JSON.parse(resText)       
-        create_ui(prefJson, ws)
+        create_ui(prefJson)
     })
     
 }
 
-Module.onRuntimeInitialized = rt_start
+// wasm finish loadin will call this
+var Module = {
+    onRuntimeInitialized: rt_start
+}
 
 </script>
 <link rel="stylesheet" type="text/css" href="pixel_draw.css">
-
+<script src="asm_gfx.js"></script>
 </head>
 <body id="body" onload="page_onload()"></body>
 

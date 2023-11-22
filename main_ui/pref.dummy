@@ -1,1 +1,17 @@
-{"clock":{"p0_t1_font_idx":-1,"p0_t1_x":0,"p0_t1_y":0,"p0_t1_color":65535,"p0_t2_font_idx":-1,"p0_t2_x":0,"p0_t2_y":16,"p0_t2_color":65535,"p0_back_col":0,"p0_show_sec":true,"p0_show_day":false}}
+{
+	"clock":
+	{
+		"p0_t1_font_idx":-1,
+		"p0_t1_x":0,
+		"p0_t1_y":0,
+		"p0_t1_color":65535,
+		"p0_t2_font_idx":-1,
+		"p0_t2_x":0,
+		"p0_t2_y":16,
+		"p0_t2_color":65535,
+		"p0_back_col":0,
+		"p0_show_sec":true,
+		"p0_show_day":false,
+		"tz_offset": 2
+	}
+}

@@ -496,7 +496,7 @@ inline void PxMATRIX::fillMatrixBuffer(int16_t x, int16_t y, uint8_t r, uint8_t 
   total_offset_g=total_offset_r-_pattern_color_bytes;
   total_offset_b=total_offset_g-_pattern_color_bytes;
 
-uint8_t *PxMATRIX_bufferp = PxMATRIX_buffer;
+  uint8_t *PxMATRIX_bufferp = PxMATRIX_buffer;
 
 #ifdef PxMATRIX_DOUBLE_BUFFER
   PxMATRIX_bufferp = selected_buffer ? PxMATRIX_buffer2 : PxMATRIX_buffer;

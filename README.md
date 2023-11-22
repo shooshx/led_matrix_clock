@@ -6,6 +6,15 @@ instructions:
 - build wasm by going to adafruit_gfx_emu\build and running build_rel.py
 - upload pages to Arduino by using the SPIFFS uploader
 
+
+TODO:
+- buttons
+- time, stopper
+- color offset in display
+- text display performance
+- mDNS?
+
+
 TODO:
 wasm mime type  in WebResponses.cpp
 

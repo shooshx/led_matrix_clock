@@ -87,6 +87,7 @@ body {
 
 .draw_canvas {
     width: 100%;
+    max-width: 1200px;
 }
 
 .draw_control {
@@ -180,4 +181,13 @@ body {
     display: inline-block;
     vertical-align: top;
     box-sizing: border-box;
+}
+
+.dimg_ctrl {
+    display: inline-block;
+    width: 500px;
+    vertical-align: top;
+}
+.dimg_disp {
+    display: inline-block;
 }

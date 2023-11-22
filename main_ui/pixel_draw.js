@@ -207,6 +207,20 @@ function connect_events(canvas, s)
     });
 }
 
+function make_buf_cmd(cmd_t, elem_count, elem_sz)
+{
+    const cmd = new Uint8Array(2 + 4 + elem_count * elem_sz)
+    let offset = 0
+    cmd[offset++] = cmd_t.charCodeAt(0)
+    cmd[offset++] = cmd_t.charCodeAt(1)
+    const count_buf = new Uint32Array(1)
+    count_buf[0] = elem_count
+    const count_bufb = new Uint8Array(count_buf.buffer, 0, 4)
+    for(let i = 0; i < 4; ++i)
+        cmd[offset++] = count_bufb[i]
+    return [cmd, offset]
+}
+
 // accumulate pixel changes to a single ws command that's send once a second
 class UpdatesQueue {
     constructor(ws) {
@@ -216,25 +230,14 @@ class UpdatesQueue {
         window.setInterval(()=>{
             if (this.accum.size == 0)
                 return
-            const cmd = new Uint8Array(this.accum.size * 5 + 4 + 2)
-            let offset = 0
-            cmd[offset++] = 'D'.charCodeAt(0)
-            cmd[offset++] = 'P'.charCodeAt(0)
-            const count_buf = new Uint32Array(1)
-            count_buf[0] = this.accum.size
-            const count_bufb = new Uint8Array(count_buf.buffer, 0, 4)
-            for(let i = 0; i < 4; ++i)
-                cmd[offset++] = count_bufb[i]
-            
-            //let cmd = "DP " + this.accum.size
+            let [cmd, offset] = make_buf_cmd('DP', this.accum.size, 5)
             for (let [k, c] of this.accum) {
-                //cmd += " " + k + " " + c
                 for(let i = 0; i < 5; ++i)
                     cmd[offset++] = c[i];
             }
             this.accum.clear()
             ws.send(cmd)
-            console.log("sent " + offset + " bytes")
+            console.log("sent DP " + offset + " bytes")
         }, 500)
     }
     add(x, y, r, g, b) {
@@ -275,3 +278,5 @@ function draw_pixel_create(root, w, h, ws)
 
     connect_events(s.canvas, s)
 }
+
+
