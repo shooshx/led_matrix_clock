@@ -1,6 +1,5 @@
 {
-	"clock":
-	{
+	"clock": {
 		"p0_t1_font_idx":-1,
 		"p0_t1_x":0,
 		"p0_t1_y":0,
@@ -13,5 +12,14 @@
 		"p0_show_sec":true,
 		"p0_show_day":false,
 		"tz_offset": 2
+	},
+	"timer": {
+		"tm_t1_font_idx":-1,
+		"tm_t1_x":0,
+		"tm_t1_y":0,
+		"tm_t1_color":65535,
+		"tm_hours":0,
+		"tm_min":30,
+		"tm_sec":0
 	}
 }

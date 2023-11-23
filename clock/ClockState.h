@@ -9,6 +9,7 @@ extern PxMATRIX display;
 struct TextBlock : public PropHolder<4>
 {
     String m_name;
+    String m_text;
     Prop<int16_t> m_font_index;
     Prop<int16_t> m_x;
     Prop<int16_t> m_y;
@@ -22,8 +23,12 @@ struct TextBlock : public PropHolder<4>
       , m_color(this, name + "_color", 0xffff)
     {  
     }
+
+    void set(const String& text) {
+        m_text = text;
+    }
      
-    void draw(const String& text)
+    void draw()
     {
         Timer t;
         if (m_font_index.get() < 0 || m_font_index.get() > sizeof(all_fonts)/sizeof(all_fonts[0]) )
@@ -33,92 +38,97 @@ struct TextBlock : public PropHolder<4>
         display.setTextColor(m_color.get());
         display.setCursor(m_x.get(), m_y.get());
         auto ts = t.restart();
-        display.print(text);
+        display.print(m_text);
         auto tp = t.restart();
         //printf("    text took %d, %d\n", ts, tp);
     }
     
 };
 
+
 const char * days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"} ;
 const char * short_days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"} ;
 const char * months[] = {"Jan", "Feb", "Mar", "Apr", "May", "June", "July", "Aug", "Sep", "Oct", "Nov", "Dec"} ;
 const char * ampm[] = {"AM", "PM"}; 
 
-struct ClockPanel : public PropHolder<5>
+struct ClockPanel : public PropHolder<6>
 {
     String m_name;
-    TextBlock m_text1;
-    TextBlock m_text2;
+    TextBlock m_time_text;  // time
+    TextBlock m_date_text;  // date
     Prop<uint16_t> m_back_color;
     Prop<bool> m_show_sec;
     Prop<bool> m_show_day;
-
-    String m_cur_date;
-    String m_cur_time;
-
+    Prop<int16_t> m_tz_offset;
+    
     ClockPanel(const String& name, NamesIndex* name_index)
       : PropHolder(name_index), m_name(name)
-      , m_text1(this, name + "_t1")
-      , m_text2(this, name + "_t2")
+      , m_time_text(this, name + "_t1")
+      , m_date_text(this, name + "_t2")
       , m_back_color(this, name + "_back_col", 0)
       , m_show_sec(this, name + "_show_sec", true)
       , m_show_day(this, name + "_show_day", false)
+      , m_tz_offset(this, "tz_offset", 3)
     {
-        Serial.println("ClockPanel ctor");
-        m_text2.m_y.set(16);
+        //Serial.println("ClockPanel ctor");
+        m_date_text.m_y.set(16);
     }
 
-    void time_to_strings(time_t local)
+    void time_to_strings(time_t utcTime)
     {
-        m_cur_date = "";  // clear the variables
-        m_cur_time = "";
+        time_t local = utcTime + m_tz_offset.get() * 3600;
+        
+        String cur_date;
+        String cur_time;
     
         // now format the Time variables into strings with proper names for month, day etc
         if (m_show_day.get()) {
-            m_cur_date += short_days[weekday(local)-1];
-            m_cur_date += " ";
+            cur_date += short_days[weekday(local)-1];
+            cur_date += " ";
         }
 
-        m_cur_date += day(local);
-        m_cur_date += "/";
+        cur_date += day(local);
+        cur_date += "/";
         //cur_date += months[month(local)-1];
-        m_cur_date += month(local);
-        m_cur_date += "/";
-        m_cur_date += year(local);
+        cur_date += month(local);
+        cur_date += "/";
+        cur_date += year(local);
 
         int h = hour(local);
         if (h < 10)
-            m_cur_time += "0";
-        m_cur_time += h;
+            cur_time += "0";
+        cur_time += h;
         int sec = second(local);
-        m_cur_time += ":";
+        cur_time += ":";
         int mn = minute(local);
         if(mn < 10)  // add a zero if minute is under 10
-            m_cur_time += "0";
-        m_cur_time += mn;
+            cur_time += "0";
+        cur_time += mn;
         if (m_show_sec.get()) {
-            m_cur_time += ":";  
+            cur_time += ":";  
             if(sec < 10)  // add a zero if minute is under 10
-                m_cur_time += "0";
-            m_cur_time += sec;
+                cur_time += "0";
+            cur_time += sec;
         }
+
+        m_time_text.set(cur_time);
+        m_date_text.set(cur_date);
     
         //cur_time += " ";
         //cur_time += ampm[isPM(local)];
     }
 
 
-    void draw(time_t localTime)
+    void draw(time_t utcTime)
     {
         Timer t;
         display.clearDisplay();
         auto tc = t.restart();
         //display.fillScreen(m_back_color.get());
-        time_to_strings(localTime);
+        time_to_strings(utcTime);
         auto ts = t.restart();
-        m_text1.draw(m_cur_time);
-        m_text2.draw(m_cur_date);
+        m_time_text.draw();
+        m_date_text.draw();
         auto td = t.restart();
         //printf("  clock took %d, %d, %d\n", tc, ts, td);
     }
@@ -152,9 +162,9 @@ public:
         m_panel.toJson(obj);
     }
     
-    void draw(time_t localTime)
+    void draw(time_t utcTime)
     {
-        m_panel.draw(localTime);
+        m_panel.draw(utcTime);
     }
 
 

@@ -1,12 +1,13 @@
 #pragma once
 #include <unordered_map>
+#include "base_utils.h"
 
 class IProp
 {
 public:
     IProp() {}
     virtual void load(Preferences& pref) = 0;
-    virtual void save(Preferences& pref) = 0;
+    virtual bool save(Preferences& pref) = 0;
     virtual void toJson(const JsonObject& obj) = 0;
     virtual bool setInt(int v) {
         Serial.printf("bad setInt in IProp");
@@ -95,9 +96,16 @@ public:
         for(int i = 0; i < m_sz; ++i)
             m_arr[i]->load(pref);
     }
-    void save(Preferences& pref) override {
+    // called on save() whenever one of my children is changed
+    virtual void child_changed() {}
+    bool save(Preferences& pref) override {
+        bool any_saved = false;
         for(int i = 0; i < m_sz; ++i)
-            m_arr[i]->save(pref);      
+            if (m_arr[i]->save(pref))
+                any_saved = true;
+        if (any_saved)
+          child_changed();
+        return any_saved;
     }
     void toJson(const JsonObject& obj) override {
         for(int i = 0; i < m_sz; ++i)
@@ -142,7 +150,7 @@ public:
         return m_value;
     }
     void load(Preferences& pref) override;
-    void save(Preferences& pref) override;
+    bool save(Preferences& pref) override;
     void toJson(const JsonObject& obj) override
     {
         //Serial.printf("toJson %s, %d\n", m_name.c_str(), m_value);
@@ -162,13 +170,14 @@ void Prop<bool>::load(Preferences& pref) {
 }
 
 template<>
-void Prop<bool>::save(Preferences& pref) {
+bool Prop<bool>::save(Preferences& pref) {
   if (!m_dirty)
-      return;
+      return false;
   auto r = pref.putBool(m_name.c_str(), m_value);
   if (r == 0)
         Serial.printf("Failed saving b %s, %d\n", m_name.c_str(), m_value);     
   m_dirty = false;
+  return true;
 }
 
 template<>
@@ -186,13 +195,14 @@ void Prop<uint16_t>::load(Preferences& pref) {
 }
 
 template<>
-void Prop<uint16_t>::save(Preferences& pref) {
+bool Prop<uint16_t>::save(Preferences& pref) {
   if (!m_dirty)
-      return;
+      return false;
   auto r = pref.putUShort(m_name.c_str(), m_value);
   if (r == 0)
       Serial.printf("Failed saving uint16 %s, %d = %d\n", m_name.c_str(), m_value, r);     
   m_dirty = false;
+  return true;
 }
 template<>
 bool Prop<uint16_t>::setInt(int v) {
@@ -209,13 +219,14 @@ void Prop<int16_t>::load(Preferences& pref) {
 }
 
 template<>
-void Prop<int16_t>::save(Preferences& pref) {
+bool Prop<int16_t>::save(Preferences& pref) {
   if (!m_dirty)
-      return;
+      return false;
   auto r = pref.putShort(m_name.c_str(), m_value);
   if (r == 0)
       Serial.printf("Failed saving int16 %s, %d=%d\n", m_name.c_str(), m_value, r);
   m_dirty = false;
+  return true;
 }
 
 template<>

@@ -2,10 +2,10 @@
 
 class ClockPanel
 {
-    constructor(name, pref_json, pref_update)
+    constructor(name, pref_json)
     {
-        this.text1 = new TextBlock(name + "_t1", pref_json, pref_update, "20:23:45", 5, 1, 1)
-        this.text2 = new TextBlock(name + "_t2", pref_json, pref_update, "Fri 20/10/2023", -1, 0, 20)
+        this.text1 = new TextBlock(name + "_t1", pref_json, "20:23:45")
+        this.text2 = new TextBlock(name + "_t2", pref_json, "Fri 20/10/2023")
         this.show_seconds = NumProp.from_json(name + "_show_sec", pref_json)
         this.show_day = NumProp.from_json(name + "_show_day", pref_json)
         //this.back_color = ColorProp.from_json(name + "_back_col", pref_json)
@@ -47,14 +47,14 @@ class ClockPanel
 
     add_ui(ctrl, display_cb, pref_update)
     {
-        const col1 = add_elem(ctrl, 'div', ['t_col', 't_col1'])
-        const t1cont = add_elem(col1, 'div', ['t_cont', 't1_cont'])
+        const col1 = add_div(ctrl, ['t_col', 't_col1'])
+        const t1cont = add_div(col1, ['t_cont', 't1_cont'])
         this.text1.add_ui(t1cont, display_cb, pref_update)
 
-        const t2cont = add_elem(col1, 'div', ['t_cont', 't2_cont'])
+        const t2cont = add_div(col1, ['t_cont', 't2_cont'])
         this.text2.add_ui(t2cont, display_cb, pref_update)
 
-        const col2 = add_elem(ctrl, 'div', ['t_col', 't_col2'])
+        const col2 = add_div(ctrl, ['t_col', 't_col2'])
         add_checkbox_input(col2, "Seconds", this.show_seconds.v, (v)=>{
             this.show_seconds.set_and_update(v, pref_update)
             this.update_time(display_cb)
@@ -85,15 +85,15 @@ class ClockPanel
     }
 }
 
-function clock_create(parent, pref_json, ws)
+function clock_create(parent, pref_json, ws, width, height)
 {
-    const clock = add_elem(parent, 'div', 'clock_top')
-    const ctrl = add_elem(clock, 'div', 'clock_ctrl')
-    const disp = add_elem(clock, 'div', 'clock_disp')
-    const clock_canvas = new GfxCanvas(PX_WIDTH, PX_HEIGHT, 5, disp, 0, "clock_canvas")
-    Module.gfx_init_display(clock_canvas, PX_WIDTH, PX_HEIGHT)
+    const clock = add_div(parent, 'clock_top')
+    const ctrl = add_div(clock, 'clock_ctrl')
+    const disp = add_div(clock, 'clock_disp')
+    const clock_canvas = new GfxCanvas(width, height, 5, disp, 0, "clock_canvas")
+    Module.gfx_init_display(clock_canvas, width, height)
 
-    let panel = new ClockPanel("p0", pref_json.clock)
+    const panel = new ClockPanel("p0", pref_json.clock)
 
     const display = ()=>{
         clock_canvas.gfx.clear()
@@ -115,10 +115,140 @@ function clock_create(parent, pref_json, ws)
 
 class TimerPanel
 {
+    constructor(name, pref_json) {
+        this.text1 = new TextBlock(name + "_t1", pref_json, "20:23:45")
+        this.hours = NumProp.from_json(name + "_hours", pref_json)
+        this.min = NumProp.from_json(name + "_min", pref_json)
+        this.sec = NumProp.from_json(name + "_sec", pref_json)
+
+        this.running = false
+        this.dest_time_msec = 0 // while running this is the current destimation
+        this.cur_diff_msec = 0
+    }
+
+    read_input() {
+        return ((this.hours.v * 60 + this.min.v) * 60 + this.sec.v) * 1000;
+    }
+
+    toggle_run() {
+        if (!this.running) {
+            if (this.cur_diff_msec == 0)
+                this.cur_diff_msec = this.read_input()
+            this.dest_time_msec = new Date().getTime() + this.cur_diff_msec
+            this.running = true
+        }
+        else {
+            this.running = false
+        }
+    }
+
+    start_time(display_cb) {
+        this.set_time(display_cb)
+        window.setInterval(()=>{ this.update_time(display_cb) }, 100)
+    }
+
+    // called when the input is changed
+    set_time(display_cb) {
+        this.cur_diff_msec = this.read_input()
+        this.update_time(display_cb)
+    }
+
+    update_time(display_cb)
+    {
+        if (this.running) {
+            const now = new Date().getTime()
+            this.cur_diff_msec = this.dest_time_msec - now
+            if (this.cur_diff_msec < 0) {
+                this.cur_diff_msec = 0
+                this.running = false
+            }
+        }
+
+        let d = this.cur_diff_msec
+        const h = Math.trunc(d / (60*60*1000))
+        d -= h * (60*60*1000)
+        const m = Math.trunc(d / (60*1000))
+        d -= m * (60*1000)
+        const s = Math.trunc(d / 1000)
+        d -= s * 1000
+        const ms = Math.trunc(d / 100)
+
+        let t = ""
+        if (h > 0)
+            t += h + ":"
+        if (h > 0 && m < 10)
+            t += "0"
+        t += m + ":"
+        if (s < 10)
+            t += "0"
+        t += s
+
+        t += "." + ms
+        this.text1.text = t
+
+        display_cb()
+    }
+
+    add_ui(ctrl, display_cb, pref_update, send_toggle)
+    {
+        const col1 = add_div(ctrl, ['t_col', 't_col1'])
+        const t1cont = add_div(col1, ['t_cont', 'tm1_cont'])
+        this.text1.add_ui(t1cont, display_cb, pref_update)
+
+        const tset = add_div(ctrl, 't_set_time')
+        add_div(tset, 'tset_label').innerText = 'Set Time:'
+        add_num_input(tset, null, this.hours.v, (value)=>{
+            this.hours.set_and_update(value, pref_update)
+            this.set_time(display_cb)
+        }, {min:0})
+        add_num_input(tset, null, this.min.v, (value)=>{
+            this.min.set_and_update(value, pref_update)
+            this.set_time(display_cb)
+        }, {min:0, max:59})
+        add_num_input(tset, null, this.sec.v, (value)=>{
+            this.sec.set_and_update(value, pref_update)
+            this.set_time(display_cb)
+        }, {min:0, max:59})
+        const start_btn = add_div(ctrl, 'tm_btn')
+        start_btn.innerText = 'Toggle'
+        start_btn.addEventListener('click', ()=>{
+            this.toggle_run()
+            send_toggle(this.running ? 1 : 0)
+        })
+
+    }
+
+    draw(gfx)
+    {
+        this.text1.draw(gfx)
+    }
 }
 
-function timer_create(parent, pref_json, ws)
+function timer_create(parent, pref_json, ws, width, height)
 {
+    const timer = add_div(parent, 'timer_top')
+    const ctrl = add_div(timer, 'timer_ctrl')
+    const disp = add_div(timer, 'timer_disp')
+    const timer_canvas = new GfxCanvas(width, height, 5, disp, 0, 'timer_canvas')
+    Module.gfx_init_display(timer_canvas, width, height)
+    const panel = new TimerPanel('tm', pref_json.timer)
+
+    const display = ()=>{
+        timer_canvas.gfx.clear()
+        panel.draw(timer_canvas.gfx)
+        timer_canvas.draw()
+    }
+    const send_update = (name, value)=>{
+        const cmd = "U " + name + " " + value
+        ws.send(cmd)
+    }
+    const send_toggle = (v)=>{
+        const cmd = "TT " + v
+        ws.send(cmd)
+    }
+    panel.add_ui(ctrl, display, send_update, send_toggle)
+    panel.start_time(display)
+    display()
 }
 
 

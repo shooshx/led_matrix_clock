@@ -167,7 +167,7 @@ body {
 
   .clock_disp {
     position: absolute;
-    left: 400px;
+    left: 420px;
     top: 5px;
   }
 
@@ -189,5 +189,27 @@ body {
     vertical-align: top;
 }
 .dimg_disp {
+    display: inline-block;
+}
+
+.timer_top {
+    position: relative;
+    min-height: 200px;
+}
+.timer_disp {
+    position: absolute;
+    left: 420px;
+    top: 5px;
+}
+.tm1_cont {
+    border-radius: 8px;
+}
+.t_set_time {
+    margin: 10px;
+}
+.tm_btn {
+    padding: 7px;
+    border-radius: 10px;
+    background-color: #9f9f9f;
     display: inline-block;
 }

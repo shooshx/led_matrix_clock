@@ -8,10 +8,13 @@ instructions:
 
 
 TODO:
-- buttons
 - time, stopper
+- timer alarm change active_section
+- timer text aligned to right
+- buttons
 - color offset in display
 - text display performance
+    - double buffering
 - mDNS?
 
 

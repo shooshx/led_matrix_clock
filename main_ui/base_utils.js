@@ -15,6 +15,9 @@ function add_elem(parent, elem_type, cls) {
     parent.appendChild(e)
     return e
 }
+function add_div(parent, cls) {
+    return add_elem(parent, 'div', cls)
+}
 
 
 class GfxCanvas
@@ -95,7 +98,7 @@ function add_select(parent, label, values, init_value, cb)
     return sel
 }
 
-function add_num_input(parent, label, init_val, cb)
+function add_num_input(parent, label, init_val, cb, opt={})
 {
     if (label != null) {
         const lbl = add_elem(parent, 'label', 'num_in_label')
@@ -114,8 +117,26 @@ function add_num_input(parent, label, init_val, cb)
     const plus_btn = add_elem(cont, 'div', ['num_in_plus', 'num_in_btn'])
     plus_btn.innerText = '+'
 
-    minus_btn.addEventListener('click', ()=>{ inp.value = parseInt(inp.value) - 1; cb(inp.value) })
-    plus_btn.addEventListener('click', ()=>{ inp.value = parseInt(inp.value) + 1; cb(inp.value) })
+    minus_btn.addEventListener('click', ()=>{ 
+        const prevv = parseInt(inp.value)
+        let newv = prevv - 1; 
+        if (opt.min !== undefined && newv < opt.min)
+            newv = opt.min
+        if (newv == prevv)
+            return
+        inp.value = newv
+        cb(newv) 
+    })
+    plus_btn.addEventListener('click', ()=>{ 
+        const prevv = parseInt(inp.value)
+        let newv = prevv + 1
+        if (opt.max !== undefined && newv > opt.max)
+            newv = opt.max
+        if (newv == prevv)
+            return
+        inp.value = newv; 
+        cb(newv) 
+    })
     return inp
 }
 
@@ -196,7 +217,7 @@ class NumProp
 
 class TextBlock
 {
-    constructor(name, pref_json, text, font_index, x, y)
+    constructor(name, pref_json, text)
     {
         this.text = text
         this.font_index = NumProp.from_json(name + "_font_idx", pref_json)

@@ -15,10 +15,12 @@
 
 #include <ArduinoJson.h>
 //#include <PxMatrix.h>
+//#define double_buffer //- doesn't work yet?
 #include "myPxMatrix.h"
 
 #include "my_fonts/fonts_index.h"
 #include "ClockState.h"
+#include "TimerState.h"
 #include "base_utils.h"
 
 
@@ -37,9 +39,6 @@ WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
 
 
-unsigned long epochTime;
-int tzOffset = +3;
-
 #define DISPLAY_WIDTH 64
 #define DISPLAY_HEIGHT 32
 
@@ -54,6 +53,9 @@ int tzOffset = +3;
 PxMATRIX display(DISPLAY_WIDTH,DISPLAY_HEIGHT,P_LAT, P_OE,P_A,P_B,P_C,P_D);
 bool has_display = false;
 bool has_serial = false;
+
+unsigned long g_epoch_time = 0;
+
 
 enum Section {
     SECTION_OFF = 0,
@@ -90,11 +92,13 @@ public:
     NamesIndex m_prop_map;
     ClockState clock_state;
     TopState top;
+    TimerState timer;
 
 
     State()
         : clock_state(&m_prop_map)
         , top(&m_prop_map)
+        , timer(&m_prop_map)
     {
     }
 
@@ -115,6 +119,7 @@ public:
     {
         top.toJson(root);
         clock_state.toJson(root.createNestedObject("clock"));
+        timer.toJson(root.createNestedObject("timer"));
     }
 
     void load()
@@ -122,11 +127,13 @@ public:
         Serial.printf("props: %d\n", m_prop_map.size());
         clock_state.load();
         top.load();
+        timer.load();
     }
     void save()
     {
         clock_state.save();
-	top.save();
+	      top.save();
+        timer.save();
     }
 };
 
@@ -348,7 +355,7 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
     
         int count = strSplit(line, sp, 3);
         if (count != 3) {
-            Serial.printf("Unexpected number of args of UC %d\n", count);
+            Serial.printf("Unexpected number of args of U %d\n", count);
             return;
         }
         int v = sp[2].toInt();
@@ -366,7 +373,23 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
         else if (subcmd == 'I')
             parse_img_cmd(v);
         else
-            Serial.printf("Unknown subcmd %c\n", subcmd);
+            Serial.printf("Unknown D subcmd %c\n", subcmd);
+    }
+    else if (cmd == 'T')
+    {
+        String sp[2];
+        String line((char*)&v[0]);
+        int count = strSplit(line, sp, 2);
+        if (count != 2) {
+          Serial.printf("Unexpeted number of argument to T %d\n", count);
+          return;
+        }
+        int v = sp[1].toInt();
+        Serial.printf("timer toggle %c %d\n", subcmd, v);
+        if (subcmd == 'T')
+            state->timer.m_panel.toggle_run(v);
+        else
+            Serial.printf("Unknown T subcmd %c\n", subcmd);
     }
     else
     {
@@ -448,7 +471,7 @@ void setupWeb()
         request->send(200, "text/plain", "hello world"); 
     });
     server.on("/gettime", HTTP_GET, [](AsyncWebServerRequest *request){
-        request->send(200, "text/plain", String(epochTime));
+        request->send(200, "text/plain", String(g_epoch_time));
     });
     server.on("/led", HTTP_GET, [](AsyncWebServerRequest *request){
         if (request->args() == 0) {
@@ -583,43 +606,55 @@ void setup(void)
   setupDisplay();
 }
 
+
 bool updateTime()
 {
   if (WiFi.status() != WL_CONNECTED)
     return false;
   timeClient.update();
-  unsigned long prevEpochTime = epochTime;
-  epochTime =  timeClient.getEpochTime();
-  return (epochTime != prevEpochTime);
+  unsigned long prevEpochTime = g_epoch_time;
+  g_epoch_time =  timeClient.getEpochTime();
+  return (g_epoch_time != prevEpochTime);
 }
 
 
 
 int g_loop_count = 0;
 int g_last_count = 0;
+int g_prev_section = -1;
 
-void loop(void){
+void loop(void)
+{
   ++g_loop_count;
+  int section = state->top.active_section.get();
+  bool section_changed = (section != g_prev_section);
   
-  bool timeChanged = updateTime(); // TODO: needed this often?
+  bool time_changed = updateTime(); // TODO: needed this often?
 
-  if (timeChanged && state->top.active_section.get() == SECTION_CLOCK)
+  if ((time_changed || section_changed) && section == SECTION_CLOCK)
   {
     Timer t;
     
-    time_t utc = epochTime;
-    time_t local = utc + tzOffset * 3600;
+    time_t utc = g_epoch_time;
+    //time_t local = utc + tzOffset * 3600;
     if (has_display)
     {
-        state->clock_state.draw(local);
+        state->clock_state.draw(utc);
         // time passing indicator pixel
         //display.drawPixel(0, epochTime % 32, 0xffff);
     }
 
     Serial.printf("draw took %d loops:%d\n", t.elapsed(), g_loop_count - g_last_count);
     g_last_count = g_loop_count;
-
   }
+
+  bool timer_need_draw = state->timer.m_panel.update_time();
+  if ((timer_need_draw || section_changed) && state->top.active_section.get() == SECTION_TIMER)
+  {
+    state->timer.m_panel.draw();
+  }
+
+  g_prev_section = section;
 
   ws.cleanupClients();
   /*

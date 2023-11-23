@@ -137,9 +137,9 @@ function create_ui(prefJson)
 
     const off_e = create_section(body, 'Off', active_section, send_off_update)
     const clk_e = create_section(body, 'Clock', active_section, send_update)
-    clock_create(clk_e, prefJson, ws_wrap)
+    clock_create(clk_e, prefJson, ws_wrap, PX_WIDTH, PX_HEIGHT)
     const timer_e = create_section(body, "Timer", active_section, send_update)
-    timer_create(timer_e, prefJson, ws_wrap)
+    timer_create(timer_e, prefJson, ws_wrap, PX_WIDTH, PX_HEIGHT)
 
     const stopper_e = create_section(body, "Stop Watch", active_section, send_update)
 
