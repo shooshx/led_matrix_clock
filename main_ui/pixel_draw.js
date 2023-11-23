@@ -251,13 +251,13 @@ class UpdatesQueue {
 
 function draw_pixel_create(root, w, h, ws)
 {
-    const top_elem = add_elem(root, 'div', 'draw_top')
-    const control_elem = add_elem(top_elem, 'div', 'draw_control')
+    const top_elem = add_div(root, 'draw_top')
+    const control_elem = add_div(top_elem, 'draw_control')
 
     const uq = new UpdatesQueue(ws)
     const s = new DrawState(top_elem, 'draw_canvas', w, h, uq)
 
-    const clear_but = add_elem(control_elem, 'div', 'button')
+    const clear_but = add_div(control_elem, 'button')
     clear_but.innerText = 'Clear'
     clear_but.addEventListener('click', (e)=>{
         s.clear();

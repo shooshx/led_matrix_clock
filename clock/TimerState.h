@@ -12,6 +12,7 @@ struct TimerPanel : public PropHolder<4>
   int m_dest_time_msec = 0;  // counting to destination time
   int m_cur_diff_msec = 0; // current draw
   int m_last_draw_diff_msec = 0; // last draw we did
+  bool m_force_draw = false;
 
   TimerPanel(const String& name, NamesIndex* name_index)
     : PropHolder(name_index)
@@ -20,7 +21,9 @@ struct TimerPanel : public PropHolder<4>
     , m_min(this, name + "_min", 30)
     , m_sec(this, name + "_sec", 0)
   {
+    m_force_draw = true;  // set initial text
   }
+  
 
   int read_input() {
     return ((m_hour.get() * 60 + m_min.get()) * 60 + m_sec.get()) * 1000;
@@ -50,6 +53,7 @@ struct TimerPanel : public PropHolder<4>
 
   void child_changed() override {
     set_time();
+    m_force_draw = true;
   }
 
   // called in loop to update the text
@@ -64,32 +68,12 @@ struct TimerPanel : public PropHolder<4>
         m_running = false;
       }
     }
-    if (m_cur_diff_msec == m_last_draw_diff_msec)
+    if (m_cur_diff_msec == m_last_draw_diff_msec && !m_force_draw)
       return false;
-    int d = m_cur_diff_msec;
-    int h = trunc(d / (60*60*1000));
-    d -= h * (60*60*1000);
-    int m = trunc(d / (60*1000));
-    d -= m * (60*1000);
-    int s = trunc(d / 1000);
-    d -= s * 1000;
-    int ms = trunc(d / 100);
-
-    String t;
-    if (h > 0) {
-      t += h;
-      t += ":";
-      if (m < 10)
-        t += "0";
-    }
-    t += m;
-    t += ":";
-    if (s < 10)
-      t += "0";
-    t += s;
-
-    t += ".";
-    t += ms;
+    //Serial.printf("Timer: update_time\n");   
+    m_force_draw = false;
+    
+    auto t = format_time(m_cur_diff_msec);
     //Serial.printf("Timer: %s\n", t.c_str());
     m_timer_text.set(t);
     m_last_draw_diff_msec = m_cur_diff_msec;

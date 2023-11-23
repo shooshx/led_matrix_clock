@@ -100,10 +100,10 @@ const sections = []
 
 function create_section(parent, text, active_section, send_update)
 {
-    const cont = add_elem(parent, 'div', 'section_cont')
-    const header = add_elem(cont, 'div', 'section_hdr')
+    const cont = add_div(parent, 'section_cont')
+    const header = add_div(cont, 'section_hdr')
     header.innerText = text
-    const e = add_elem(cont, 'div', 'section_elem')
+    const e = add_div(cont, 'section_elem')
     const my_index = sections.length
     const init_vis = (active_section == my_index)
     header.addEventListener('click', ()=>{
@@ -141,7 +141,8 @@ function create_ui(prefJson)
     const timer_e = create_section(body, "Timer", active_section, send_update)
     timer_create(timer_e, prefJson, ws_wrap, PX_WIDTH, PX_HEIGHT)
 
-    const stopper_e = create_section(body, "Stop Watch", active_section, send_update)
+    const stopw_e = create_section(body, "Stop Watch", active_section, send_update)
+    stop_watch_create(stopw_e, prefJson, ws_wrap, PX_WIDTH, PX_HEIGHT)
 
     const draw_e = create_section(body, 'Draw', active_section, send_update)
     draw_pixel_create(draw_e, PX_WIDTH, PX_HEIGHT, ws_wrap)

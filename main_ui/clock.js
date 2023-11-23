@@ -113,6 +113,31 @@ function clock_create(parent, pref_json, ws, width, height)
 
 // ---------------------------------------------------------------------------------------------------------
 
+
+function format_time(d)
+{
+    const h = Math.trunc(d / (60*60*1000))
+    d -= h * (60*60*1000)
+    const m = Math.trunc(d / (60*1000))
+    d -= m * (60*1000)
+    const s = Math.trunc(d / 1000)
+    d -= s * 1000
+    const ms = Math.trunc(d / 100)
+
+    let t = ""
+    if (h > 0)
+        t += h + ":"
+    if (h > 0 && m < 10)
+        t += "0"
+    t += m + ":"
+    if (s < 10)
+        t += "0"
+    t += s
+
+    t += "." + ms
+    return t
+}
+
 class TimerPanel
 {
     constructor(name, pref_json) {
@@ -164,32 +189,11 @@ class TimerPanel
             }
         }
 
-        let d = this.cur_diff_msec
-        const h = Math.trunc(d / (60*60*1000))
-        d -= h * (60*60*1000)
-        const m = Math.trunc(d / (60*1000))
-        d -= m * (60*1000)
-        const s = Math.trunc(d / 1000)
-        d -= s * 1000
-        const ms = Math.trunc(d / 100)
-
-        let t = ""
-        if (h > 0)
-            t += h + ":"
-        if (h > 0 && m < 10)
-            t += "0"
-        t += m + ":"
-        if (s < 10)
-            t += "0"
-        t += s
-
-        t += "." + ms
-        this.text1.text = t
-
+        this.text1.text = format_time(this.cur_diff_msec)
         display_cb()
     }
 
-    add_ui(ctrl, display_cb, pref_update, send_toggle)
+    add_ui(ctrl, display_cb, pref_update, send_cmd)
     {
         const col1 = add_div(ctrl, ['t_col', 't_col1'])
         const t1cont = add_div(col1, ['t_cont', 'tm1_cont'])
@@ -209,11 +213,11 @@ class TimerPanel
             this.sec.set_and_update(value, pref_update)
             this.set_time(display_cb)
         }, {min:0, max:59})
-        const start_btn = add_div(ctrl, 'tm_btn')
-        start_btn.innerText = 'Toggle'
-        start_btn.addEventListener('click', ()=>{
+
+        add_btn(ctrl, 'Toggle', ()=>{
             this.toggle_run()
-            send_toggle(this.running ? 1 : 0)
+            const cmd = "TT " + (this.running ? 1 : 0)
+            send_cmd(cmd)
         })
 
     }
@@ -224,33 +228,110 @@ class TimerPanel
     }
 }
 
-function timer_create(parent, pref_json, ws, width, height)
+function time_generic_create(parent, pref_json, ws, width, height, PanelCls, pref_prefix)
 {
     const timer = add_div(parent, 'timer_top')
     const ctrl = add_div(timer, 'timer_ctrl')
     const disp = add_div(timer, 'timer_disp')
-    const timer_canvas = new GfxCanvas(width, height, 5, disp, 0, 'timer_canvas')
-    Module.gfx_init_display(timer_canvas, width, height)
-    const panel = new TimerPanel('tm', pref_json.timer)
+    const canvas = new GfxCanvas(width, height, 5, disp, 0, 'timer_canvas')
+    Module.gfx_init_display(canvas, width, height)
+    const panel = new PanelCls(pref_prefix, pref_json)
 
     const display = ()=>{
-        timer_canvas.gfx.clear()
-        panel.draw(timer_canvas.gfx)
-        timer_canvas.draw()
+        canvas.gfx.clear()
+        panel.draw(canvas.gfx)
+        canvas.draw()
     }
     const send_update = (name, value)=>{
         const cmd = "U " + name + " " + value
         ws.send(cmd)
     }
-    const send_toggle = (v)=>{
-        const cmd = "TT " + v
-        ws.send(cmd)
+    const send_cmd = (v)=>{
+        ws.send(v)
     }
-    panel.add_ui(ctrl, display, send_update, send_toggle)
+    panel.add_ui(ctrl, display, send_update, send_cmd)
     panel.start_time(display)
     display()
 }
 
+
+function timer_create(parent, pref_json, ws, width, height)
+{
+    time_generic_create(parent, pref_json.timer, ws, width, height, TimerPanel, "tm")
+}
+
+// ---------------------------------------------------------------------------------------------------------
+
+class StopWPanel
+{
+    constructor(name, pref_json) {
+        this.text1 = new TextBlock(name + "_t1", pref_json, "20:23:45")
+
+        this.is_running = false
+        this.start_time_msec = -1
+        this.cur_diff_msec = 0
+    }
+
+    start_time(display_cb) {
+        window.setInterval(()=>{ this.update_time(display_cb) }, 100)
+    }
+
+    toggle_run() {
+        if (!this.running) {
+            if (this.start_time_msec == -1)
+                this.start_time_msec = new Date().getTime()
+        }
+        this.running = !this.running
+    }
+    reset() {
+        this.cur_diff_msec = 0
+        if (!this.running) {
+            this.start_time_msec = -1
+        }
+        else {
+            this.start_time_msec = new Date().getTime()
+        }
+    }
+
+    update_time(display_cb)
+    {
+        if (this.running) {
+            const now = new Date().getTime()
+            this.cur_diff_msec = now - this.start_time_msec
+        }
+
+        this.text1.text = format_time(this.cur_diff_msec)
+        display_cb()
+    }
+
+    add_ui(ctrl, display_cb, pref_update, send_cmd)
+    {
+        const col1 = add_div(ctrl, ['t_col', 't_col1'])
+        const t1cont = add_div(col1, ['t_cont', 'tm1_cont'])
+        this.text1.add_ui(t1cont, display_cb, pref_update)
+        const colbtn = add_div(ctrl, 'sw_btns')
+        add_btn(colbtn, 'Toggle', ()=>{
+            this.toggle_run()
+            const cmd = "TS " + (this.running ? 1 : 0)
+            send_cmd(cmd)
+        })
+        add_btn(colbtn, 'Reset', ()=>{
+            this.reset()
+            send_cmd("TR")
+        })
+
+    }
+
+    draw(gfx)
+    {
+        this.text1.draw(gfx)
+    }
+}
+
+function stop_watch_create(parent, pref_json, ws, width, height)
+{
+    time_generic_create(parent, pref_json.stopw, ws, width, height, StopWPanel, "sw")
+}
 
 // ---------------------------------------------------------------------------------------------------------
 
@@ -288,7 +369,7 @@ class LinearGradient
     
     add_ui(ctrl, display_cb, send_update_cb)
     {   
-        const ctrl_line1 = add_elem(ctrl, 'div', 'ctrl_line')
+        const ctrl_line1 = add_div(ctrl, 'ctrl_line')
         const col1_in = add_elem(ctrl_line1, 'input', 'clock_col_in')
         ColorEditBox.create_at(col1_in, 300, (c)=>{ 
             this.color1 = {r:c.r, g:c.g, b:c.b}
@@ -357,9 +438,9 @@ class DImgPanel
 
 function draw_image_create(parent, width, height, ws)
 {
-    const dimg = add_elem(parent, 'div', 'dimg_top')
-    const ctrl = add_elem(dimg, 'div', 'dimg_ctrl')
-    const disp = add_elem(dimg, 'div', 'dimg_disp')
+    const dimg = add_div(parent, 'dimg_top')
+    const ctrl = add_div(dimg, 'dimg_ctrl')
+    const disp = add_div(dimg, 'dimg_disp')
     const dimg_canvas = new GfxCanvas(width, height, 5, disp, 0, 'dimg_canvas')
     Module.gfx_init_display(dimg_canvas, width, height)
 

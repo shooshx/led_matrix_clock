@@ -15,12 +15,13 @@
 
 #include <ArduinoJson.h>
 //#include <PxMatrix.h>
-//#define double_buffer //- doesn't work yet?
+//#define double_buffer
 #include "myPxMatrix.h"
 
 #include "my_fonts/fonts_index.h"
 #include "ClockState.h"
 #include "TimerState.h"
+#include "StopWState.h"
 #include "base_utils.h"
 
 
@@ -61,7 +62,7 @@ enum Section {
     SECTION_OFF = 0,
     SECTION_CLOCK = 1,
     SECTION_TIMER = 2,
-    SECTION_STOPPER = 3,
+    SECTION_STOPW = 3,
     SECTION_DRAW = 4,
     SECTION_IMAGE = 5
 };
@@ -93,12 +94,13 @@ public:
     ClockState clock_state;
     TopState top;
     TimerState timer;
-
+    StopWState stopw;
 
     State()
         : clock_state(&m_prop_map)
         , top(&m_prop_map)
         , timer(&m_prop_map)
+        , stopw(&m_prop_map)
     {
     }
 
@@ -111,7 +113,7 @@ public:
             Serial.printf("prop not found %s\n", name.c_str());
             return false;
         }
-        //zSerial.printf("found %s, going to call setInt %d\n", name.c_str(), v);
+        //Serial.printf("found %s, going to call setInt %d\n", name.c_str(), v);
         return prop->setInt(v);
     }
     
@@ -120,6 +122,7 @@ public:
         top.toJson(root);
         clock_state.toJson(root.createNestedObject("clock"));
         timer.toJson(root.createNestedObject("timer"));
+        stopw.toJson(root.createNestedObject("stopw"));
     }
 
     void load()
@@ -128,12 +131,14 @@ public:
         clock_state.load();
         top.load();
         timer.load();
+        stopw.load();
     }
     void save()
     {
         clock_state.save();
 	      top.save();
         timer.save();
+        stopw.save();
     }
 };
 
@@ -377,19 +382,27 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
     }
     else if (cmd == 'T')
     {
-        String sp[2];
-        String line((char*)&v[0]);
-        int count = strSplit(line, sp, 2);
-        if (count != 2) {
-          Serial.printf("Unexpeted number of argument to T %d\n", count);
-          return;
+        if (subcmd == 'R') {
+            Serial.printf("stop watch reset\n");
+            state->stopw.m_panel.reset();
         }
-        int v = sp[1].toInt();
-        Serial.printf("timer toggle %c %d\n", subcmd, v);
-        if (subcmd == 'T')
-            state->timer.m_panel.toggle_run(v);
-        else
-            Serial.printf("Unknown T subcmd %c\n", subcmd);
+        else {
+            String sp[2];
+            String line((char*)&v[0]);
+            int count = strSplit(line, sp, 2);
+            if (count != 2) {
+              Serial.printf("Unexpeted number of argument to T %d\n", count);
+              return;
+            }
+            int v = sp[1].toInt();
+            Serial.printf("timer toggle %c %d\n", subcmd, v);
+            if (subcmd == 'T')
+                state->timer.m_panel.toggle_run(v);
+            else if (subcmd == 'S')
+                state->stopw.m_panel.toggle_run(v);
+            else
+                Serial.printf("Unknown T subcmd %c\n", subcmd);
+        }
     }
     else
     {
@@ -649,9 +662,15 @@ void loop(void)
   }
 
   bool timer_need_draw = state->timer.m_panel.update_time();
-  if ((timer_need_draw || section_changed) && state->top.active_section.get() == SECTION_TIMER)
+  if ((timer_need_draw || section_changed) && section == SECTION_TIMER)
   {
     state->timer.m_panel.draw();
+  }
+
+  bool stopw_need_draw = state->stopw.m_panel.update_time();
+  if ((stopw_need_draw || section_changed) && section == SECTION_STOPW)
+  {
+    state->stopw.m_panel.draw();
   }
 
   g_prev_section = section;

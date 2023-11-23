@@ -8,10 +8,11 @@ instructions:
 
 
 TODO:
-- time, stopper
 - timer alarm change active_section
+- after some time with of inactivity go back to clock
 - timer text aligned to right
-- buttons
+- font editor
+- GPIO buttons
 - color offset in display
 - text display performance
     - double buffering

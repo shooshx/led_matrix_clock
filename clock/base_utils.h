@@ -73,3 +73,32 @@ struct Timer
         return r;
     }
 };
+
+String format_time(time_t tmsec)
+{
+    int64_t d = tmsec;
+    int h = trunc(d / (60*60*1000));
+    d -= h * (60*60*1000);
+    int m = trunc(d / (60*1000));
+    d -= m * (60*1000);
+    int s = trunc(d / 1000);
+    d -= s * 1000;
+    int ms = trunc(d / 100);
+
+    String t;
+    if (h > 0) {
+      t += h;
+      t += ":";
+      if (m < 10)
+        t += "0";
+    }
+    t += m;
+    t += ":";
+    if (s < 10)
+      t += "0";
+    t += s;
+
+    t += ".";
+    t += ms;
+    return t;
+}

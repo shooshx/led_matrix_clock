@@ -104,8 +104,8 @@ function add_num_input(parent, label, init_val, cb, opt={})
         const lbl = add_elem(parent, 'label', 'num_in_label')
         lbl.innerText = label
     }
-    const cont = add_elem(parent, 'div', 'num_in_cont')
-    const minus_btn = add_elem(cont, 'div', ['num_in_minus', 'num_in_btn'])
+    const cont = add_div(parent, 'num_in_cont')
+    const minus_btn = add_div(cont, ['num_in_minus', 'num_in_btn'])
     minus_btn.innerHTML = '&ndash;'
 
     const inp = add_elem(cont, 'input', 'num_input')
@@ -114,7 +114,7 @@ function add_num_input(parent, label, init_val, cb, opt={})
     inp.value = init_val
     inp.addEventListener('change', ()=>{ cb(inp.value) } )
 
-    const plus_btn = add_elem(cont, 'div', ['num_in_plus', 'num_in_btn'])
+    const plus_btn = add_div(cont, ['num_in_plus', 'num_in_btn'])
     plus_btn.innerText = '+'
 
     minus_btn.addEventListener('click', ()=>{ 
@@ -142,7 +142,7 @@ function add_num_input(parent, label, init_val, cb, opt={})
 
 function add_checkbox_input(parent, label, init_val, cb)
 {
-    const cont = add_elem(parent, 'div', 'in_check_cont')
+    const cont = add_div(parent, 'in_check_cont')
     const inp = add_elem(cont, 'input', 'in_checkbox')
     inp.setAttribute('type', 'checkbox')
     const lbl = add_elem(cont, 'label', 'in_check_label')
@@ -154,6 +154,13 @@ function add_checkbox_input(parent, label, init_val, cb)
 
     inp.checked = init_val
     inp.addEventListener('change', ()=>{ cb(inp.checked ? 1 : 0) })
+}
+
+function add_btn(parent, text, cb) 
+{
+    const btn = add_div(parent, 'tm_btn')
+    btn.innerText = text
+    btn.addEventListener('click', cb)
 }
 
 
@@ -233,7 +240,7 @@ class TextBlock
 
     add_ui(ctrl, display_cb, pref_update) 
     {
-        const ctrl_line1 = add_elem(ctrl, 'div', 'ctrl_line')
+        const ctrl_line1 = add_div(ctrl, 'ctrl_line')
         const col_in = add_elem(ctrl_line1, 'input', 'clock_col_in')
         col_in.setAttribute('readonly', true)
         ColorEditBox.create_at(col_in, 300, (c)=>{ 
@@ -246,7 +253,7 @@ class TextBlock
             display_cb()
         })
 
-        const ctrl_line2 = add_elem(ctrl, 'div', 'ctrl_line_last')
+        const ctrl_line2 = add_div(ctrl, 'ctrl_line_last')
         add_num_input(ctrl_line2, null, this.x.v, (value)=>{
             this.x.set_and_update(value, pref_update)
             display_cb()
