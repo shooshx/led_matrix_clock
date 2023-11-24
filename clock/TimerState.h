@@ -1,12 +1,15 @@
 #pragma once
 #include "Prop.h"
 
-struct TimerPanel : public PropHolder<4>
+struct TimerPanel : public PropHolder<6>
 {
   TextBlock m_timer_text;
   Prop<uint16_t> m_hour;
   Prop<uint16_t> m_min;
   Prop<uint16_t> m_sec;
+
+  Prop<int16_t> m_snd_vol;
+  Prop<int16_t> m_snd_file_num;
 
   bool m_running = false;
   int m_dest_time_msec = 0;  // counting to destination time
@@ -20,6 +23,8 @@ struct TimerPanel : public PropHolder<4>
     , m_hour(this, name + "_hours", 0)
     , m_min(this, name + "_min", 30)
     , m_sec(this, name + "_sec", 0)
+    , m_snd_vol(this, name + "_snd_vol", 15)
+    , m_snd_file_num(this, name + "_snd_file_num", 1)
   {
     m_force_draw = true;  // set initial text
   }

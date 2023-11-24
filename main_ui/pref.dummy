@@ -1,5 +1,5 @@
 {
-	"active_section":1
+	"active_section":1,
 	"clock": {
 		"p0_t1_font_idx":-1,
 		"p0_t1_x":0,
@@ -21,7 +21,9 @@
 		"tm_t1_color":65535,
 		"tm_hours":0,
 		"tm_min":30,
-		"tm_sec":0
+		"tm_sec":0,
+		"tm_snd_vol":15,
+		"tm_snd_file_num":1
 	},
 	"stopw": {
 		"sw_t1_font_idx":-1,

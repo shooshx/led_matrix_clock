@@ -8,15 +8,17 @@ instructions:
 
 
 TODO:
+- sound
+- fix python
+- animations for timer, stop watch (cursor?)
 - timer alarm change active_section
 - after some time with of inactivity go back to clock
 - timer text aligned to right
 - font editor
 - GPIO buttons
 - color offset in display
-- text display performance
-    - double buffering
-- mDNS?
+- test setFastUpdate
+
 
 
 TODO:

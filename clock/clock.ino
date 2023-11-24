@@ -15,8 +15,9 @@
 
 #include <ArduinoJson.h>
 //#include <PxMatrix.h>
-//#define double_buffer
+#define double_buffer
 #include "myPxMatrix.h"
+#include "SerialMp3Player.h"
 
 #include "my_fonts/fonts_index.h"
 #include "ClockState.h"
@@ -52,6 +53,9 @@ NTPClient timeClient(ntpUDP);
 #define P_OE 2
 
 PxMATRIX display(DISPLAY_WIDTH,DISPLAY_HEIGHT,P_LAT, P_OE,P_A,P_B,P_C,P_D);
+
+SerialMp3Player sound_player;
+
 bool has_display = false;
 bool has_serial = false;
 
@@ -299,12 +303,14 @@ void parse_pixel_cmd(const std::vector<uint8_t>& v)
     return;
   }
   int offset = 6;
+  display.copyBuffer();
   for(int i = 0; i < sz; ++i) {
     PixelDat* p = (PixelDat*)&v[offset];
     offset += 5;
     display.drawPixelRGB888(p->x, p->y, p->r, p->g, p->b);
     //Serial.printf("PP-draw %d,%d, %x-%x-%x\n", p->x, p->y, p->r, p->g, p->b);
   }
+  display.showBuffer();
 }
 
 void parse_img_cmd(const std::vector<uint8_t>& v)
@@ -323,6 +329,8 @@ void parse_img_cmd(const std::vector<uint8_t>& v)
     Serial.printf("img_cmd wrong size3 %d, %d, %d\n", sz, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     return;
   }
+  display.copyBuffer();
+  
   int offset = 6;
   int x = 0, y = 0;
   for(int i = 0; i < sz; ++i) {
@@ -334,6 +342,7 @@ void parse_img_cmd(const std::vector<uint8_t>& v)
       ++y;
     }
   }
+  display.showBuffer();
   //Serial.printf("img_cmd done %d\n", sz);
 }
 
@@ -373,8 +382,10 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
     {
         if (subcmd == 'P')
             parse_pixel_cmd(v);        
-        else if (subcmd == 'C') 
+        else if (subcmd == 'C') {
             display.clearDisplay();
+            display.showBuffer();
+        }
         else if (subcmd == 'I')
             parse_img_cmd(v);
         else
@@ -385,6 +396,13 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
         if (subcmd == 'R') {
             Serial.printf("stop watch reset\n");
             state->stopw.m_panel.reset();
+        }
+        else if (subcmd == 'P') {
+            Serial.printf("play sound %d,%d\n", state->timer.m_panel.m_snd_vol.get(), state->timer.m_panel.m_snd_file_num.get());
+            sound_player.set_volume(state->timer.m_panel.m_snd_vol.get());
+            delay(200);
+            sound_player.play_file(1, state->timer.m_panel.m_snd_file_num.get());
+            delay(200);
         }
         else {
             String sp[2];
@@ -588,6 +606,7 @@ void setupDisplay()
   display.setCursor(2,0);
   display.print("Pixel");
   display.setTextWrap(false);
+  display.showBuffer();
 
   setupDisplayISR();
   //setupDisplayISR_old();
@@ -605,6 +624,11 @@ void setupState()
     state->load();
 }
 
+void setupSound()
+{
+    sound_player.begin();
+}
+
 void setup(void)
 {
   setupSerial();
@@ -617,6 +641,7 @@ void setup(void)
   setupWeb();
 
   setupDisplay();
+  setupSound();
 }
 
 
@@ -653,6 +678,7 @@ void loop(void)
     if (has_display)
     {
         state->clock_state.draw(utc);
+        display.showBuffer();
         // time passing indicator pixel
         //display.drawPixel(0, epochTime % 32, 0xffff);
     }
@@ -665,12 +691,14 @@ void loop(void)
   if ((timer_need_draw || section_changed) && section == SECTION_TIMER)
   {
     state->timer.m_panel.draw();
+    display.showBuffer();
   }
 
   bool stopw_need_draw = state->stopw.m_panel.update_time();
   if ((stopw_need_draw || section_changed) && section == SECTION_STOPW)
   {
     state->stopw.m_panel.draw();
+    display.showBuffer();
   }
 
   g_prev_section = section;

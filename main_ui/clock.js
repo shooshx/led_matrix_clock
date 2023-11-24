@@ -87,9 +87,9 @@ class ClockPanel
 
 function clock_create(parent, pref_json, ws, width, height)
 {
-    const clock = add_div(parent, 'clock_top')
-    const ctrl = add_div(clock, 'clock_ctrl')
-    const disp = add_div(clock, 'clock_disp')
+    const clock = add_div(parent, 'sect_top')
+    const ctrl = add_div(clock, 'sect_ctrl')
+    const disp = add_div(clock, 'sect_disp')
     const clock_canvas = new GfxCanvas(width, height, 5, disp, 0, "clock_canvas")
     Module.gfx_init_display(clock_canvas, width, height)
 
@@ -145,6 +145,8 @@ class TimerPanel
         this.hours = NumProp.from_json(name + "_hours", pref_json)
         this.min = NumProp.from_json(name + "_min", pref_json)
         this.sec = NumProp.from_json(name + "_sec", pref_json)
+        this.snd_vol = NumProp.from_json(name + "_snd_vol", pref_json)
+        this.snd_file_num = NumProp.from_json(name + "_snd_file_num", pref_json) 
 
         this.running = false
         this.dest_time_msec = 0 // while running this is the current destimation
@@ -199,6 +201,19 @@ class TimerPanel
         const t1cont = add_div(col1, ['t_cont', 'tm1_cont'])
         this.text1.add_ui(t1cont, display_cb, pref_update)
 
+        const sndcont = add_div(ctrl, 't_col_snd')
+        const sline1 = add_div(sndcont, 'ctrl_line')
+        add_num_input(sline1, "Volume:", this.snd_vol.v, (value)=>{
+            this.snd_vol.set_and_update(value, pref_update)
+        })
+        const sline2 = add_div(sndcont, 'ctrl_line_last')
+        add_num_input(sline2, "File-Num:", this.snd_file_num.v, (value)=>{
+            this.snd_file_num.set_and_update(value, pref_update)
+        })
+        add_btn(sline2, 'Play', ()=>{
+            send_cmd("TP")
+        })
+
         const tset = add_div(ctrl, 't_set_time')
         add_div(tset, 'tset_label').innerText = 'Set Time:'
         add_num_input(tset, null, this.hours.v, (value)=>{
@@ -219,6 +234,7 @@ class TimerPanel
             const cmd = "TT " + (this.running ? 1 : 0)
             send_cmd(cmd)
         })
+        
 
     }
 
@@ -230,9 +246,9 @@ class TimerPanel
 
 function time_generic_create(parent, pref_json, ws, width, height, PanelCls, pref_prefix)
 {
-    const timer = add_div(parent, 'timer_top')
-    const ctrl = add_div(timer, 'timer_ctrl')
-    const disp = add_div(timer, 'timer_disp')
+    const timer = add_div(parent, 'sect_top')
+    const ctrl = add_div(timer, 'sect_ctrl')
+    const disp = add_div(timer, 'sect_disp')
     const canvas = new GfxCanvas(width, height, 5, disp, 0, 'timer_canvas')
     Module.gfx_init_display(canvas, width, height)
     const panel = new PanelCls(pref_prefix, pref_json)

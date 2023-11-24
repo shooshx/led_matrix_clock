@@ -156,16 +156,18 @@ body {
     cursor: pointer;
   }
 
-  .clock_ctrl
+  .sect_ctrl
   {
     width: max-content;
+    min-height: 200px;
   }
 
-  .clock_top {
+  .sect_top {
     position: relative;
+    margin: 10px 0 10px 0;
   }
 
-  .clock_disp {
+  .sect_disp {
     position: absolute;
     left: 420px;
     top: 5px;
@@ -192,21 +194,21 @@ body {
     display: inline-block;
 }
 
-.timer_top {
-    position: relative;
-    min-height: 200px;
-}
-.timer_disp {
-    position: absolute;
-    left: 420px;
-    top: 5px;
-}
+
 .tm1_cont {
     border-radius: 8px;
 }
 .t_set_time {
     margin: 10px;
 }
+.t_col_snd {
+    border: 1px solid #000000;
+    border-radius: 8px;
+    width: max-content;
+    padding: 10px;
+    margin-top: 10px;
+}
+
 .tm_btn {
     padding: 7px;
     border-radius: 10px;
