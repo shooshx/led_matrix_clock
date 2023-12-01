@@ -24,14 +24,38 @@ else:
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
+class Prop:
+    def __init__(self, d):
+        self.d = d
 
-g_pref_dict = None
+class Pref:
+    def __init__(self, j):
+        self.index = {}
+        self.d = self.enum_fields(j)
+
+    def enum_fields(self, j):
+        curd = {}
+        for k, v in j.items():
+            if isinstance(v, dict):
+                curd[k] = self.enum_fields(v)
+            else:
+                p = Prop(v)
+                curd[k] = p
+                assert k not in self.index, f"duplicate key in prop index {k}"
+                self.index[k] = p
+        return curd
+
+def json_default(obj):
+    if isinstance(obj, Prop) or isinstance(obj, Pref):
+        return obj.d
+    return obj
+
+g_pref = None
 
 class JsonPrefHandler:
     def do_GET(self, handler):
         if handler.path.startswith("/pref"):
-            print("making perf")
-            jstr = json.dumps(g_pref_dict).encode('utf-8')
+            jstr = json.dumps(g_pref, default=json_default).encode('utf-8')
             handler.send_response(HTTPStatus.OK)
             handler.send_header("Content-type", "application/json")
             handler.send_header("Content-Length", len(jstr))
@@ -54,14 +78,10 @@ class WSPrefHandler(HTTPWebSocketsHandler):
         #self.send_message(str(message))
         self.log_message('WS received "%s"',str(message))
         sp = message.split()
-        if sp[0] == 'UC':
+        if sp[0] == 'U':
             key = sp[1]
             value = sp[2]
-            g_pref_dict['clock'][key] = value
-        elif sp[0] == 'UT':
-            key = sp[1]
-            value = sp[2]
-            g_pref_dict[key] = value
+            g_pref.index[key].d = value
         elif sp[0] == 'D':
             pass
         else:
@@ -82,8 +102,8 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 # go to main_ui and run python ..\py_server\main.py 80
 
 def main():
-    global g_pref_dict
-    g_pref_dict = json.load(open(os.path.join(this_dir, "..", "main_ui", "pref.dummy")))
+    global g_pref
+    g_pref = Pref(json.load(open(os.path.join(this_dir, "..", "main_ui", "pref.dummy"))))
     try:
         #Replace WSSimpleEcho with your own subclass of HTTPWebSocketHandler
         server = ThreadedHTTPServer(('', port), WSPrefHandler)

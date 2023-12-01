@@ -138,10 +138,38 @@ function format_time(d)
     return t
 }
 
+function format_time_sp(d)
+{
+    const h = Math.trunc(d / (60*60*1000))
+    d -= h * (60*60*1000)
+    const m = Math.trunc(d / (60*1000))
+    d -= m * (60*1000)
+    const s = Math.trunc(d / 1000)
+    d -= s * 1000
+    const ms = Math.trunc(d / 100)
+
+    let shour = null, smin = null, ssec = null, stsec = null
+    if (h > 0) {
+        shour = "" + h
+    }
+    if (h > 0 && m < 10)
+        smin = "0"
+    else
+        smin = ""
+    smin += m
+    if (s < 10)
+        ssec = "0"
+    else
+        ssec = ""
+    ssec += s
+    stsec = "" + ms
+    return [shour, smin, ssec, stsec]
+}
+
 class TimerPanel
 {
     constructor(name, pref_json) {
-        this.text1 = new TextBlock(name + "_t1", pref_json, "20:23:45")
+        this.text1 = new ClockTextBlock(name + "_t1", pref_json)
         this.hours = NumProp.from_json(name + "_hours", pref_json)
         this.min = NumProp.from_json(name + "_min", pref_json)
         this.sec = NumProp.from_json(name + "_sec", pref_json)
@@ -151,6 +179,9 @@ class TimerPanel
         this.running = false
         this.dest_time_msec = 0 // while running this is the current destimation
         this.cur_diff_msec = 0
+
+        this.prev_diff_msec = 0
+        this.force_draw = false
     }
 
     read_input() {
@@ -177,11 +208,13 @@ class TimerPanel
     // called when the input is changed
     set_time(display_cb) {
         this.cur_diff_msec = this.read_input()
+        this.force_draw = true
         this.update_time(display_cb)
     }
 
     update_time(display_cb)
     {
+        this.prev_diff_msec = this.cur_diff_msec
         if (this.running) {
             const now = new Date().getTime()
             this.cur_diff_msec = this.dest_time_msec - now
@@ -190,8 +223,12 @@ class TimerPanel
                 this.running = false
             }
         }
-
-        this.text1.text = format_time(this.cur_diff_msec)
+        //if (this.prev_diff_msec == this.cur_diff_msec && !this.force_draw)
+        //    return
+        this.force_draw = false
+        //this.text1.text = format_time(this.cur_diff_msec)
+        const [h, m, s, t] = format_time_sp(this.cur_diff_msec)
+        this.text1.set_time(h, m, s, t)
         display_cb()
     }
 
@@ -268,12 +305,14 @@ function time_generic_create(parent, pref_json, ws, width, height, PanelCls, pre
     panel.add_ui(ctrl, display, send_update, send_cmd)
     panel.start_time(display)
     display()
+    return canvas
 }
 
+let timer_canvas = null
 
 function timer_create(parent, pref_json, ws, width, height)
 {
-    time_generic_create(parent, pref_json.timer, ws, width, height, TimerPanel, "tm")
+    timer_canvas = time_generic_create(parent, pref_json.timer, ws, width, height, TimerPanel, "tm")
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -281,8 +320,7 @@ function timer_create(parent, pref_json, ws, width, height)
 class StopWPanel
 {
     constructor(name, pref_json) {
-        this.text1 = new TextBlock(name + "_t1", pref_json, "20:23:45")
-
+        this.text1 = new ClockTextBlock(name + "_t1", pref_json, "20:23:45", ALIGN_RIGHT)
         this.is_running = false
         this.start_time_msec = -1
         this.cur_diff_msec = 0
@@ -296,6 +334,8 @@ class StopWPanel
         if (!this.running) {
             if (this.start_time_msec == -1)
                 this.start_time_msec = new Date().getTime()
+            else
+                this.start_time_msec = new Date().getTime() - this.cur_diff_msec // as if it was started diff msec ago
         }
         this.running = !this.running
     }
@@ -316,7 +356,9 @@ class StopWPanel
             this.cur_diff_msec = now - this.start_time_msec
         }
 
-        this.text1.text = format_time(this.cur_diff_msec)
+        //this.text1.text = format_time(this.cur_diff_msec)
+        const [h, m, s, t] = format_time_sp(this.cur_diff_msec)
+        this.text1.set_time(h, m, s, t)
         display_cb()
     }
 

@@ -19,7 +19,7 @@ struct TimerPanel : public PropHolder<6>
 
   TimerPanel(const String& name, NamesIndex* name_index)
     : PropHolder(name_index)
-    , m_timer_text(this, name + "_t1")
+    , m_timer_text(this, name + "_t1", RIGHT_ALIGN)
     , m_hour(this, name + "_hours", 0)
     , m_min(this, name + "_min", 30)
     , m_sec(this, name + "_sec", 0)

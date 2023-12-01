@@ -210,32 +210,41 @@ class NumProp
     constructor(name, v) {
         this.name = name
         this.v = v
+        this.cb = null
+    }
+    set_cb(cb) {
+        this.cb = cb
     }
     set_and_update(v, pref_update) {
         this.v = v
         pref_update(this.name, this.v)
+        if (this.cb !== null)
+            this.cb()
     }
     static from_json(name, pref_json) {
-        const v = pref_json[name]
+        const v = parseInt(pref_json[name])
         return new NumProp(name, v)
     }
 }
 
+const ALIGN_LEFT = 0
+const ALIGN_RIGHT = 1
 
 class TextBlock
 {
-    constructor(name, pref_json, text)
+    constructor(name, pref_json, text, align=ALIGN_LEFT)
     {
         this.text = text
         this.font_index = NumProp.from_json(name + "_font_idx", pref_json)
         this.x = NumProp.from_json(name + "_x", pref_json)
         this.y = NumProp.from_json(name + "_y", pref_json)
         this.color = ColorProp.from_json(name + "_color", pref_json)
+        this.align = align
     }
     draw(gfx) {
         gfx.set_font(this.font_index.v)
         gfx.set_text_color(this.color.r, this.color.g, this.color.b)
-        gfx.print_str_at(this.x.v, this.y.v, this.text)
+        gfx.print_str_at(this.x.v, this.y.v, this.text, this.align)
     }
 
     add_ui(ctrl, display_cb, pref_update) 
@@ -262,6 +271,108 @@ class TextBlock
             this.y.set_and_update(value, pref_update)
             display_cb()
         })
+    }
+}
+
+const DIGIT_PAIRS = ["00", "11", "22", "33", "44", "55", "66", "77", "88", "99"]
+
+class ClockTextBlock extends TextBlock
+{
+    constructor(name, pref_json) {
+        super(name, pref_json, "", ALIGN_LEFT)
+        this.hour = "00"
+        this.min = "00"
+        this.sec = "00"
+        this.tsec = "0"
+
+        this.width_dbl_num = 0
+        this.width_color = 0
+        this.width_point = 0
+        this.width_digit = []
+        this.prev_font = -1
+    }
+
+    set_time(h, m, s, t) {
+        this.hour = h
+        this.min = m
+        this.sec = s
+        this.tsec = t
+    }
+
+    recalc_font(gfx) {
+        let max_width = 0
+        for(let p of DIGIT_PAIRS) {
+            const w = gfx.calc_str_width(p)
+            if (w > max_width)
+                max_width = w
+        }
+        for(let i = 0; i < 9; ++i) {
+            const si = "" + i
+            this.width_digit[si] = gfx.calc_str_width(si)
+        }
+        this.width_dbl_digit = max_width
+        this.width_single_digit = max_width / 2
+        this.width_colon = gfx.calc_str_width(":")
+        this.width_point = gfx.calc_str_width(".")
+    }
+
+    print_pair(gfx, x, s) {
+        if (s.length == 1)
+            gfx.print_str_at(x + this.width_single_digit, this.y.v, s, ALIGN_LEFT)
+        else {
+            const first_digit = s[0]
+            const nx = x + this.width_single_digit - this.width_digit[first_digit]
+            gfx.print_str_at(nx, this.y.v, s, ALIGN_LEFT)
+        }
+    }
+
+    draw(gfx) {
+        gfx.set_font(this.font_index.v)
+        if (this.font_index.v != this.prev_font) {
+            this.recalc_font(gfx)
+            this.prev_font = this.font_index.v
+        }
+        // this.x is the center of the string, calc to total width
+        let tw = 0;
+        if (this.hour !== null) {
+            if (this.hour.length == 1)
+                tw += this.width_single_digit + this.width_colon
+            else
+                tw += this.width_dbl_digit + this.width_colon
+        }
+        tw += this.width_dbl_digit + this.width_colon // min
+        tw += this.width_dbl_digit  // sec
+        tw += this.width_point + this.width_single_digit // tsec
+        //console.log("tw=", tw)
+        
+        let x = this.x.v - (tw / 2)
+
+        gfx.set_text_color(this.color.r, this.color.g, this.color.b)
+        if (this.hour !== null) {
+            //this.print_pair(gfx, x, this.hour)
+            gfx.print_str_at(x, this.y.v, this.hour, ALIGN_LEFT)
+            if (this.hour.length == 1)
+                x += this.width_single_digit
+            else                
+                x += this.width_dbl_digit
+            gfx.print_str_at(x, this.y.v, ":", ALIGN_LEFT)
+            x += this.width_colon
+        }
+
+        if (this.min !== null) {
+            this.print_pair(gfx, x, this.min)
+            x += this.width_dbl_digit
+            gfx.print_str_at(x, this.y.v, ":", ALIGN_LEFT)
+            x += this.width_colon
+        }
+
+        this.print_pair(gfx, x, this.sec)
+        x += this.width_dbl_digit
+
+        gfx.print_str_at(x, this.y.v, ".", ALIGN_LEFT)
+        x += this.width_point
+        gfx.print_str_at(x, this.y.v, this.tsec, ALIGN_LEFT)
+
     }
 }
 

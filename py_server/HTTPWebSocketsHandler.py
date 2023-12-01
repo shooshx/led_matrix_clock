@@ -107,7 +107,7 @@ class HTTPWebSocketsHandler(SimpleHTTPRequestHandler):
         #it returns however immediately when the socket is closed.
         try:
             opcode_s = self.rfile.read(1)
-            print(f"opcode: '{opcode_s}',{len(opcode_s)}")
+            #print(f"opcode: '{opcode_s}',{len(opcode_s)}")
             self.opcode = ord(opcode_s) & 0x0F
             length = ord(self.rfile.read(1)) & 0x7F
             if length == 126:

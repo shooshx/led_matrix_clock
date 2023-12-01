@@ -13,7 +13,7 @@ struct StopWPanel : public PropHolder<1>
 
   StopWPanel(const String& name, NamesIndex* name_index)
     : PropHolder(name_index)
-    , m_sw_text(this, name + "_t1")
+    , m_sw_text(this, name + "_t1", RIGHT_ALIGN)
   {
     m_force_draw = true; // set initial text
   }
@@ -31,6 +31,8 @@ struct StopWPanel : public PropHolder<1>
     if (!m_running) {
       if (m_start_time_msec == -1)
         m_start_time_msec = millis();
+      else
+        m_start_time_msec = millis() - m_cur_diff_msec; 
     }
     m_running = !m_running;
   }

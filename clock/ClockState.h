@@ -4,7 +4,16 @@
 
 extern PxMATRIX display;
 
+struct Rect
+{
+  int16_t x1 = 0, y1 = 0;
+  uint16_t w = 0, h = 0;
+};
 
+enum TextAlign {
+  LEFT_ALIGN = 0,
+  RIGHT_ALIGN = 1
+};
 
 struct TextBlock : public PropHolder<4>
 {
@@ -14,13 +23,15 @@ struct TextBlock : public PropHolder<4>
     Prop<int16_t> m_x;
     Prop<int16_t> m_y;
     Prop<uint16_t> m_color;
+    TextAlign m_align = LEFT_ALIGN;
 
-    TextBlock(IPropHolder* parent, const String& name)
+    TextBlock(IPropHolder* parent, const String& name, TextAlign align = LEFT_ALIGN)
       : PropHolder(parent), m_name(name)
       , m_font_index(this, name + "_font_idx", -1)
       , m_x(this, name + "_x", 0)
       , m_y(this, name + "_y", 0)
       , m_color(this, name + "_color", 0xffff)
+      , m_align(align)
     {  
     }
 
@@ -36,11 +47,22 @@ struct TextBlock : public PropHolder<4>
         else
             display.setFont(all_fonts[m_font_index.get()].fontPtr);
         display.setTextColor(m_color.get());
-        display.setCursor(m_x.get(), m_y.get());
-        auto ts = t.restart();
+        if (m_align == RIGHT_ALIGN) {
+          Rect r;
+          display.getTextBounds(m_text, m_x.get(), m_y.get(), &r.x1, &r.y1, &r.w, &r.h);
+          display.setCursor(m_x.get() - (r.w + r.x1), m_y.get());
+        }
+        else {
+          display.setCursor(m_x.get(), m_y.get());
+        }
+        
+        //auto ts = t.restart();
         display.print(m_text);
-        auto tp = t.restart();
-        //printf("    text took %d, %d\n", ts, tp);
+        //auto tp = t.restart();
+
+        //auto tb = t.restart();
+        //printf("    text took %d, %d, %d\n", ts, tp, tb);
+        
     }
     
 };

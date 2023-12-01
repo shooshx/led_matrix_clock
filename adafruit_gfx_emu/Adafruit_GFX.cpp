@@ -1447,7 +1447,7 @@ void Adafruit_GFX::charBounds(unsigned char c, int16_t *x, int16_t *y,
 /**************************************************************************/
 void Adafruit_GFX::getTextBounds(const char *str, int16_t x, int16_t y,
                                  int16_t *x1, int16_t *y1, uint16_t *w,
-                                 uint16_t *h) {
+                                 uint16_t *h, int16_t* x_after) {
 
   uint8_t c; // Current character
   int16_t minx = 0x7FFF, miny = 0x7FFF, maxx = -1, maxy = -1; // Bound rect
@@ -1471,6 +1471,7 @@ void Adafruit_GFX::getTextBounds(const char *str, int16_t x, int16_t y,
     *y1 = miny;
     *h = maxy - miny + 1;
   }
+  *x_after = x;
 }
 
 /**************************************************************************/
@@ -1488,9 +1489,9 @@ void Adafruit_GFX::getTextBounds(const char *str, int16_t x, int16_t y,
 /**************************************************************************/
 void Adafruit_GFX::getTextBounds(const String &str, int16_t x, int16_t y,
                                  int16_t *x1, int16_t *y1, uint16_t *w,
-                                 uint16_t *h) {
+                                 uint16_t *h, int16_t* x_after) {
   if (str.length() != 0) {
-    getTextBounds(const_cast<char *>(str.c_str()), x, y, x1, y1, w, h);
+    getTextBounds(const_cast<char *>(str.c_str()), x, y, x1, y1, w, h, x_after);
   }
 }
 

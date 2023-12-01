@@ -46,10 +46,18 @@ public:
         m_canvas.call<void>("setPixel", x, y, r, g, b);
     }
 
-    void print_str_at(int x, int y, const std::string& s)
+    void print_str_at(int x, int y, const std::string& s, int align=0)
     {
-        setCursor(x, y);
-        print(String(s.c_str()));
+        if (align == 0)
+            setCursor(x, y);
+        else {
+            int16_t x1 = 0, y1 = 0, x_after = 0;
+            uint16_t w = 0, h = 0;
+            getTextBounds(s.c_str(), 0, 0, &x1, &y1, &w, &h, &x_after);
+            //printf("text: `%s` bounds: %d, %d\n", s.c_str(), x1, w);
+            setCursor(x - x_after, y);
+        }
+        print(s.c_str());
     }
 
     void set_text_color(int r, int g, int b)
@@ -66,6 +74,12 @@ public:
         if (index < 0 || index >= (sizeof(all_fonts) / sizeof(FontDef)))
             return;
         setFont(all_fonts[index].fontPtr);
+    }
+    int16_t calc_str_width(const std::string& s) {
+        int16_t x1 = 0, y1 = 0, x_after = 0;
+        uint16_t w = 0, h = 0;
+        getTextBounds(s.c_str(), 0, 0, &x1, &y1, &w, &h, &x_after);
+        return x_after;
     }
 
     void set_back_col(int r, int g, int b)
@@ -106,7 +120,7 @@ std::vector<std::string> gfx_get_fonts()
     return lst;
 }
 
-// TODO remove most zeros from bitmaps
+
 // TODO support wider chars
 
 EMSCRIPTEN_BINDINGS(my_module)
@@ -126,6 +140,7 @@ EMSCRIPTEN_BINDINGS(my_module)
         .function("set_font", &JsDisplay::set_font)
         .function("clear", &JsDisplay::clear)
         .function("set_back_col", &JsDisplay::set_back_col)
+        .function("calc_str_width", &JsDisplay::calc_str_width)
         ;
     
 }

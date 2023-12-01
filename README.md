@@ -9,16 +9,18 @@ instructions:
 
 TODO:
 - sound
-- fix python
 - animations for timer, stop watch (cursor?)
-- timer alarm change active_section
+- timer alarm changes active_section
 - after some time with of inactivity go back to clock
-- timer text aligned to right
+- timer text aligned to fixed 2 digits of x_after
 - font editor
 - GPIO buttons
+- DMA display board
 - color offset in display
 - test setFastUpdate
 
+sprites:
+   https://www.spriters-resource.com/nes/A.html
 
 
 TODO:
