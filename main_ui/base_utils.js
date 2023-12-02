@@ -140,9 +140,11 @@ function add_num_input(parent, label, init_val, cb, opt={})
     return inp
 }
 
-function add_checkbox_input(parent, label, init_val, cb)
+function add_checkbox_input(parent, label, init_val, cb, cls=null)
 {
-    const cont = add_div(parent, 'in_check_cont')
+    if (cls === null)
+        cls = 'in_check_cont'
+    const cont = add_div(parent, cls)
     const inp = add_elem(cont, 'input', 'in_checkbox')
     inp.setAttribute('type', 'checkbox')
     const lbl = add_elem(cont, 'label', 'in_check_label')
@@ -284,12 +286,13 @@ class ClockTextBlock extends TextBlock
         this.min = "00"
         this.sec = "00"
         this.tsec = "0"
+        this.show_tenth = NumProp.from_json(name + "_show_tenth", pref_json)
 
         this.width_dbl_num = 0
         this.width_color = 0
         this.width_point = 0
         this.width_digit = []
-        this.prev_font = -1
+        this.prev_font = -2  // -1 is default font
     }
 
     set_time(h, m, s, t) {
@@ -297,6 +300,15 @@ class ClockTextBlock extends TextBlock
         this.min = m
         this.sec = s
         this.tsec = t
+    }
+
+    add_ui(ctrl, display_cb, pref_update) 
+    {
+        super.add_ui(ctrl, display_cb, pref_update)
+        add_checkbox_input(ctrl, "Show MSec", this.show_tenth.v, (v)=>{
+            this.show_tenth.set_and_update(v, pref_update)
+            display_cb()
+        }, 'msec_checkbox')
     }
 
     recalc_font(gfx) {
@@ -342,7 +354,8 @@ class ClockTextBlock extends TextBlock
         }
         tw += this.width_dbl_digit + this.width_colon // min
         tw += this.width_dbl_digit  // sec
-        tw += this.width_point + this.width_single_digit // tsec
+        if (this.show_tenth.v)
+            tw += this.width_point + this.width_single_digit // tsec
         //console.log("tw=", tw)
         
         let x = this.x.v - (tw / 2)
@@ -369,9 +382,11 @@ class ClockTextBlock extends TextBlock
         this.print_pair(gfx, x, this.sec)
         x += this.width_dbl_digit
 
-        gfx.print_str_at(x, this.y.v, ".", ALIGN_LEFT)
-        x += this.width_point
-        gfx.print_str_at(x, this.y.v, this.tsec, ALIGN_LEFT)
+        if (this.show_tenth.v) {
+            gfx.print_str_at(x, this.y.v, ".", ALIGN_LEFT)
+            x += this.width_point
+            gfx.print_str_at(x, this.y.v, this.tsec, ALIGN_LEFT)
+        }
 
     }
 }

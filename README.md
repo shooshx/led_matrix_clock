@@ -15,9 +15,12 @@ TODO:
 - timer text aligned to fixed 2 digits of x_after
 - font editor
 - GPIO buttons
-- DMA display board
 - color offset in display
 - test setFastUpdate
+- animations
+    - game of life
+    - plasma
+    - AuroraDemo- https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA/tree/master/examples/AuroraDemo
 
 sprites:
    https://www.spriters-resource.com/nes/A.html

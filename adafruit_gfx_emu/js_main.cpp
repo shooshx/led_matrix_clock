@@ -67,7 +67,7 @@ public:
 
     void set_font(int index)
     {
-        if (index == -1) {
+        if (index < 0) {
             setFont(nullptr);
             return;
         }

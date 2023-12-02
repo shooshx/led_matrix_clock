@@ -23,12 +23,14 @@
 		"tm_min":30,
 		"tm_sec":0,
 		"tm_snd_vol":15,
-		"tm_snd_file_num":1
+		"tm_snd_file_num":1,
+		"tm_t1_show_tenth": 1
 	},
 	"stopw": {
 		"sw_t1_font_idx":-1,
 		"sw_t1_x":0,
 		"sw_t1_y":0,
-		"sw_t1_color":65535
+		"sw_t1_color":65535,
+		"sw_t1_show_tenth":1
 	}
 }
