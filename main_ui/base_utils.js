@@ -224,7 +224,14 @@ class NumProp
             this.cb()
     }
     static from_json(name, pref_json) {
-        const v = parseInt(pref_json[name])
+        const jv = pref_json[name]
+        let v = 0
+        if (jv === true)
+            v = 1
+        else if (jv === false)
+            v = 0
+        else
+            v = parseInt(jv)
         return new NumProp(name, v)
     }
 }
@@ -288,8 +295,9 @@ class ClockTextBlock extends TextBlock
         this.tsec = "0"
         this.show_tenth = NumProp.from_json(name + "_show_tenth", pref_json)
 
-        this.width_dbl_num = 0
-        this.width_color = 0
+        this.width_dbl_digit = 0
+        this.width_single_digit = 0
+        this.width_colon = 0
         this.width_point = 0
         this.width_digit = []
         this.prev_font = -2  // -1 is default font

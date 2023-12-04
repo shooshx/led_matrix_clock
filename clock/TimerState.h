@@ -3,7 +3,7 @@
 
 struct TimerPanel : public PropHolder<6>
 {
-  TextBlock m_timer_text;
+  ClockTextBlock m_timer_text;
   Prop<uint16_t> m_hour;
   Prop<uint16_t> m_min;
   Prop<uint16_t> m_sec;
@@ -19,7 +19,7 @@ struct TimerPanel : public PropHolder<6>
 
   TimerPanel(const String& name, NamesIndex* name_index)
     : PropHolder(name_index)
-    , m_timer_text(this, name + "_t1", RIGHT_ALIGN)
+    , m_timer_text(this, name + "_t1")
     , m_hour(this, name + "_hours", 0)
     , m_min(this, name + "_min", 30)
     , m_sec(this, name + "_sec", 0)
@@ -77,10 +77,14 @@ struct TimerPanel : public PropHolder<6>
       return false;
     //Serial.printf("Timer: update_time\n");   
     m_force_draw = false;
+
     
-    auto t = format_time(m_cur_diff_msec);
+    //auto t = format_time(m_cur_diff_msec);
     //Serial.printf("Timer: %s\n", t.c_str());
-    m_timer_text.set(t);
+    //m_timer_text.set(t);
+
+    format_time_sp(m_cur_diff_msec, m_timer_text.m_hour, m_timer_text.m_min, m_timer_text.m_sec, m_timer_text.m_tsec);
+    
     m_last_draw_diff_msec = m_cur_diff_msec;
     return true;
   }

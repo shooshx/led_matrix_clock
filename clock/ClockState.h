@@ -15,7 +15,8 @@ enum TextAlign {
   RIGHT_ALIGN = 1
 };
 
-struct TextBlock : public PropHolder<4>
+template<int NParentPropNum = 0>
+struct TextBlockN : public PropHolder<4 + NParentPropNum>
 {
     String m_name;
     String m_text;
@@ -25,8 +26,8 @@ struct TextBlock : public PropHolder<4>
     Prop<uint16_t> m_color;
     TextAlign m_align = LEFT_ALIGN;
 
-    TextBlock(IPropHolder* parent, const String& name, TextAlign align = LEFT_ALIGN)
-      : PropHolder(parent), m_name(name)
+    TextBlockN(IPropHolder* parent, const String& name, TextAlign align = LEFT_ALIGN)
+      : PropHolder<4 + NParentPropNum>(parent), m_name(name)
       , m_font_index(this, name + "_font_idx", -1)
       , m_x(this, name + "_x", 0)
       , m_y(this, name + "_y", 0)
@@ -38,33 +39,161 @@ struct TextBlock : public PropHolder<4>
     void set(const String& text) {
         m_text = text;
     }
-     
-    void draw()
-    {
-        Timer t;
+
+    void do_set_font() {
         if (m_font_index.get() < 0 || m_font_index.get() > sizeof(all_fonts)/sizeof(all_fonts[0]) )
             display.setFont(nullptr);
         else
             display.setFont(all_fonts[m_font_index.get()].fontPtr);
         display.setTextColor(m_color.get());
+    }
+     
+    void draw()
+    {
+        Timer t;
+        do_set_font();
+        
         if (m_align == RIGHT_ALIGN) {
           Rect r;
-          display.getTextBounds(m_text, m_x.get(), m_y.get(), &r.x1, &r.y1, &r.w, &r.h);
+          int16_t x_after = 0;
+          display.getTextBounds(m_text, m_x.get(), m_y.get(), &r.x1, &r.y1, &r.w, &r.h, &x_after);
           display.setCursor(m_x.get() - (r.w + r.x1), m_y.get());
         }
         else {
           display.setCursor(m_x.get(), m_y.get());
+          //Serial.printf("t: %d %d %s\n", m_x.get(), m_y.get(), m_text.c_str());
         }
         
-        //auto ts = t.restart();
+        auto ts = t.restart();
         display.print(m_text);
-        //auto tp = t.restart();
 
-        //auto tb = t.restart();
-        //printf("    text took %d, %d, %d\n", ts, tp, tb);
+        auto tb = t.restart();
+        //printf("    text took %d, %d\n", ts, tb);
         
     }
+};
+
+using TextBlock = TextBlockN<0>;
+
+
+void print_str_at(int x, int y, const char* s)
+{
+  display.setCursor(x, y);
+  display.print(s);
+}
+
+void print_str_at(int x, int y, const std::string& s)
+{
+  print_str_at(x, y, s.c_str());
+}
+
+int calc_str_width(const char* s)
+{
+  Rect r;
+  int16_t x_after = 0;
+  display.getTextBounds(s, 0, 0, &r.x1, &r.y1, &r.w, &r.h, &x_after);
+  return (int)x_after;
+}
+
+struct ClockTextBlock : public TextBlockN<1>
+{
+  std::string m_hour;
+  std::string m_min;
+  std::string m_sec;
+  std::string m_tsec;
+  Prop<bool> m_show_tenth;
+   
+  int m_width_dbl_digit = 0;
+  int m_width_single_digit = 0;
+  int m_width_colon = 0;
+  int m_width_point = 0;
+  int m_width_digit[10] = {0};
+  int m_prev_font = -2; // -1 is default font
+
+   
+  ClockTextBlock(IPropHolder* parent, const String& name)
+   : TextBlockN(parent, name, LEFT_ALIGN)
+   , m_show_tenth(this, name + "_show_tenth", true)
+  {    
+  }
+
+  void recalc_font() {
+    int max_width = 0;
+    for(int i = 0; i < 9; ++i) {
+      int w = calc_str_width(digit_pairs[i]);
+      if (w > max_width)
+        max_width = w;
+        m_width_digit[i] = calc_str_width(digit_single[i]);
+    }
+    m_width_dbl_digit = max_width;
+    m_width_single_digit = max_width / 2;
+    m_width_colon = calc_str_width(":");
+    m_width_point = calc_str_width("."); 
+  }
+
+  void print_pair(int x, const std::string& s) {
+    if (s.empty())
+      return; // shouldn't happen
+    if (s.size() == 1)
+      print_str_at(x + m_width_single_digit, m_y.get(), s);
+    else {
+      int first_digit_num = ((int)s[0]) - '0';
+      int nx = x + m_width_single_digit - m_width_digit[first_digit_num];
+      print_str_at(nx, m_y.get(), s);
+    }
+      
     
+  }
+
+  void draw() {
+    do_set_font();
+    if (m_font_index.get() != m_prev_font) {
+      recalc_font();
+      m_prev_font = m_font_index.get();
+    }
+
+    int tw = 0; // total width
+    if (!m_hour.empty()) {
+      if (m_hour.size() == 1)
+        tw += m_width_single_digit + m_width_colon;
+      else
+        tw += m_width_dbl_digit + m_width_colon;
+    }
+    tw += m_width_dbl_digit + m_width_colon; // min
+    tw += m_width_dbl_digit; // sec
+    if (m_show_tenth.get())
+      tw += m_width_point + m_width_single_digit;
+
+    int x = m_x.get() - (tw / 2);
+    int y = m_y.get();
+    
+    if (!m_hour.empty()) {
+      print_str_at(x, y, m_hour);
+      if (m_hour.size() == 1)
+        x += m_width_single_digit;
+      else
+        x += m_width_dbl_digit;
+      print_str_at(x, y, ":");
+      x += m_width_colon;
+    }
+
+    print_pair(x, m_min);
+    x += m_width_dbl_digit;
+    print_str_at(x, y, ":");
+    x += m_width_colon;
+
+    print_pair(x, m_sec);
+    x += m_width_dbl_digit;
+
+    if (m_show_tenth.get()) {
+      print_str_at(x, y, ".");
+      x += m_width_point;
+      print_str_at(x, y, m_tsec);
+    }
+    
+    
+  }
+
 };
 
 

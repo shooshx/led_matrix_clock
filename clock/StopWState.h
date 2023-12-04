@@ -3,7 +3,7 @@
 
 struct StopWPanel : public PropHolder<1>
 {
-  TextBlock m_sw_text;
+  ClockTextBlock m_sw_text;
 
   bool m_running = false;
   time_t m_start_time_msec = -1; // when running, this is the start time
@@ -13,7 +13,7 @@ struct StopWPanel : public PropHolder<1>
 
   StopWPanel(const String& name, NamesIndex* name_index)
     : PropHolder(name_index)
-    , m_sw_text(this, name + "_t1", RIGHT_ALIGN)
+    , m_sw_text(this, name + "_t1")
   {
     m_force_draw = true; // set initial text
   }
@@ -55,8 +55,10 @@ struct StopWPanel : public PropHolder<1>
       return false;
     m_force_draw = false;
 
-    auto t = format_time(m_cur_diff_msec);
-    m_sw_text.set(t);
+    //auto t = format_time(m_cur_diff_msec);
+    //m_sw_text.set(t);
+    format_time_sp(m_cur_diff_msec, m_sw_text.m_hour, m_sw_text.m_min, m_sw_text.m_sec, m_sw_text.m_tsec);
+    
     m_last_draw_diff_msec = m_cur_diff_msec;
     return true;
   }

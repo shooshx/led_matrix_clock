@@ -202,7 +202,7 @@ for i in range(0, len(ATARI_MAP_RAW), 2):
 
 def output_header(f, filename):
     out = open(filename, 'w')
-    print("#include <Adafruit_GFX.h>\n\n", end='', file=out)
+    #print("#include <Adafruit_GFX.h>\n\n", end='', file=out)
     print("#ifndef ARDUINO\n  #define PROGMEM\n#endif\n", file=out)
     print("const uint8_t %sBitmap[] PROGMEM = {	\n" %(f.fontName), file=out)
 

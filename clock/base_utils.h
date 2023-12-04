@@ -102,3 +102,46 @@ String format_time(time_t tmsec)
     t += ms;
     return t;
 }
+
+const char* digit_pairs[] = {"00", "11", "22", "33", "44", "55", "66", "77", "88", "99" };
+const char* digit_single[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+const char* digit_zero_single[] = {"00", "01", "02", "03", "04", "05", "06", "07", "08", "09" };
+
+std::string two_digit_str(int n) {
+    int tens = n / 10;
+    int ones = n % 10;
+    if (tens == 0)
+        return std::string(digit_single[ones]);
+    std::string s = digit_single[tens];
+    s += digit_single[ones];  
+    return s;
+}
+
+void format_time_sp(time_t tmsec, std::string& shour, std::string& smin, std::string& ssec, std::string& stsec)
+{
+    int64_t d = tmsec;
+    int h = trunc(d / (60*60*1000));
+    d -= h * (60*60*1000);
+    int m = trunc(d / (60*1000));
+    d -= m * (60*1000);
+    int s = trunc(d / 1000);
+    d -= s * 1000;
+    int ms = trunc(d / 100);
+
+    if (h > 0)
+      shour = two_digit_str(h);
+    else
+      shour.clear();
+      
+    if (h > 0 && m < 10)
+      smin = digit_zero_single[m];
+    else
+      smin = two_digit_str(m);
+    
+    if (s < 10)
+      ssec = digit_zero_single[s];
+    else
+      ssec = two_digit_str(s);
+    
+    stsec = two_digit_str(ms);
+}

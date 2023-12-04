@@ -44,7 +44,7 @@ BSD license, check license.txt for more information
 #endif
 
 
-#include "Adafruit_GFX.h"
+#include "lib/my_Adafruit_GFX.cpp"
 #include "Arduino.h"
 #include <SPI.h>
 

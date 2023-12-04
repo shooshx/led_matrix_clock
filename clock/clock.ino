@@ -224,6 +224,7 @@ void connectWifi()
 void setupNtp()
 {
   timeClient.begin();
+  timeClient.setUpdateInterval(30 * 60000);
   // Set offset time in seconds to adjust for your timezone, for example:
   // GMT +1 = 3600
   //timeClient.setTimeOffset(3600);
@@ -647,9 +648,9 @@ void setup(void)
 
 bool updateTime()
 {
-  if (WiFi.status() != WL_CONNECTED)
-    return false;
-  timeClient.update();
+  if (WiFi.status() == WL_CONNECTED) {
+    timeClient.update();
+  }
   unsigned long prevEpochTime = g_epoch_time;
   g_epoch_time =  timeClient.getEpochTime();
   return (g_epoch_time != prevEpochTime);

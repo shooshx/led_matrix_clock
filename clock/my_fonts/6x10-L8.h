@@ -1,4 +1,3 @@
-#include <Adafruit_GFX.h>
 
 #ifndef ARDUINO
   #define PROGMEM
