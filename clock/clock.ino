@@ -71,15 +71,17 @@ enum Section {
     SECTION_IMAGE = 5
 };
 
-class TopState : public PropHolder<1>
+class TopState : public PropHolder<2>
 {
 public:
     Prop<int16_t> active_section;
+    Prop<uint16_t> brightness;
     Preferences m_pref;
 
     TopState(NamesIndex* prop_map)
       : PropHolder(prop_map)
       , active_section(this, "active_section", 0)
+      , brightness(this, "brightness", 255)
     {}
 
     void load() {
@@ -599,6 +601,7 @@ uint16_t myRED = display.color565(255, 0, 0);
 void setupDisplay() 
 {
   display.begin(8);
+  display.setFastUpdate(true);
   display.setPanelsWidth(2);
   display.clearDisplay();
   display.flushDisplay();
@@ -667,6 +670,7 @@ void loop(void)
   ++g_loop_count;
   int section = state->top.active_section.get();
   bool section_changed = (section != g_prev_section);
+  display.setBrightness(state->top.brightness.get());
   
   bool time_changed = updateTime(); // TODO: needed this often?
 

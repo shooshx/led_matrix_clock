@@ -1,5 +1,6 @@
 {
 	"active_section":1,
+	"brightness":255,
 	"clock": {
 		"p0_t1_font_idx":-1,
 		"p0_t1_x":0,

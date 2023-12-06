@@ -679,9 +679,6 @@ void PxMATRIX::set_mux(uint8_t value, bool random_access = false)
 
 void PxMATRIX::latch(uint16_t show_time )
 {
-
-  if (_driver_chip==SHIFT)
-  {
     //digitalWrite(_OE_PIN,0); // <<< remove this
     digitalWrite(_LATCH_PIN,HIGH);
     //delayMicroseconds(10);
@@ -697,7 +694,6 @@ void PxMATRIX::latch(uint16_t show_time )
         asm volatile (" nop ");
       digitalWrite(_OE_PIN,1);
     }
-  }
 
 }
 
@@ -714,9 +710,6 @@ void PxMATRIX::display(uint16_t show_time) {
   uint16_t latch_time = ((show_time*(1<<_display_color)*_brightness)/255/2);
 
   unsigned long start_time=0;
-#ifdef ESP8266
-  ESP.wdtFeed();
-#endif
 
   uint8_t *PxMATRIX_bufferp = PxMATRIX_buffer;
 
@@ -726,7 +719,6 @@ void PxMATRIX::display(uint16_t show_time) {
 
   for (uint8_t i=0;i<_row_pattern;i++)
   {
-    if(_driver_chip == SHIFT) {
       if ((_fast_update)&&(_brightness==255)){
 
         // This will clock data into the display while the outputs are still
@@ -765,7 +757,6 @@ void PxMATRIX::display(uint16_t show_time) {
 
         latch(latch_time); 
       }
-    }
     
 
   }

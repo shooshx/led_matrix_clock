@@ -12,11 +12,9 @@ TODO:
 - animations for timer, stop watch (cursor?)
 - timer alarm changes active_section
 - after some time with of inactivity go back to clock
-- timer text aligned to fixed 2 digits of x_after
 - font editor
 - GPIO buttons
-- color offset in display
-- test setFastUpdate
+- color offset in display?
 - animations
     - game of life
     - plasma
@@ -26,7 +24,7 @@ sprites:
    https://www.spriters-resource.com/nes/A.html
 
 
-TODO:
+TODO: 
 wasm mime type  in WebResponses.cpp
 
 fast update?

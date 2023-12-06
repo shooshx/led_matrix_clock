@@ -121,8 +121,13 @@ body {
     line-height: 27px;
 }
 
+.bright_in {
+    width: 400px;
+    margin: 0 5px 0 20px;
+    vertical-align: bottom;
+}
+
 .draw_size_in {
-    height: 30px;
     width: 200px;
     margin: 0 5px 0 20px;
 }
@@ -222,3 +227,4 @@ body {
 .msec_checkbox {
     margin: 10px 0 0 0;
 }
+

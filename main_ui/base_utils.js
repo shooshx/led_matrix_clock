@@ -73,7 +73,16 @@ class GfxCanvas
 }
 
 
-
+function add_slider(parent, cls, min, max, value, cb) {
+    const size_in = add_elem(parent, 'input', [cls, 'slider'])
+    size_in.setAttribute('type', 'range')
+    size_in.setAttribute('min', min)
+    size_in.setAttribute('max', max)
+    size_in.setAttribute('value', value)
+    size_in.addEventListener('input', (e)=>{
+        cb(parseInt(size_in.value))
+    })
+}
 
 let running_id = 1
 function add_select(parent, label, values, init_value, cb)

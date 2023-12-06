@@ -117,6 +117,15 @@ function create_section(parent, text, active_section, send_update)
     return e
 }
 
+function add_glob_prop_ui(parent, prefJson, send_update)
+{
+    const cont = add_div(parent, 'glob_prop')
+    add_elem(cont, 'span', 'bright_label').innerText = 'Brightness:'
+    add_slider(cont, 'bright_in', 0, 255, prefJson['brightness'] || 0, (v)=>{
+        send_update('brightness', v)
+    })
+}
+
 function create_ui(prefJson)
 {
     const active_section = prefJson['active_section'] || 0
@@ -143,6 +152,8 @@ function create_ui(prefJson)
 
     const img_e = create_section(body, 'Image', active_section, send_update)
     draw_image_create(img_e, PX_WIDTH, PX_HEIGHT, ws_wrap)
+
+    add_glob_prop_ui(body, prefJson, send_update)
 }
 
 function rt_start()

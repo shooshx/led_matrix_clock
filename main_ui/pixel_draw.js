@@ -249,6 +249,8 @@ class UpdatesQueue {
     }
 }
 
+
+
 function draw_pixel_create(root, w, h, ws)
 {
     const top_elem = add_div(root, 'draw_top')
@@ -264,13 +266,9 @@ function draw_pixel_create(root, w, h, ws)
     })
     const col_in = add_elem(control_elem, 'input', 'draw_col_in')
     ColorEditBox.create_at(col_in, 300, (c)=>{ s.set_color(c) }, {}, ColorPicker.make_hex(s.tool_color, true))
-    const size_in = add_elem(control_elem, 'input', ['draw_size_in', 'slider'])
-    size_in.setAttribute('type', 'range')
-    size_in.setAttribute('min', 0)
-    size_in.setAttribute('max', 50)
-    size_in.setAttribute('value', s.tool_radius * 10)
-    size_in.addEventListener('change', (e)=>{
-        s.set_tool_size(parseInt(size_in.value)/10)
+
+    add_slider(control_elem, 'draw_size_in', 0, 50, s.tool_radius * 10, (v)=>{
+        s.set_tool_size(v/10)
     })
 
     //s.test_pattern()
