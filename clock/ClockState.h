@@ -155,10 +155,7 @@ struct ClockTextBlock : public TextBlockN<1>
 
     int tw = 0; // total width
     if (!m_hour.empty()) {
-      if (m_hour.size() == 1)
-        tw += m_F + m_width_colon;
-      else
-        tw += m_width_dbl_digit + m_width_colon;
+      tw += m_width_dbl_digit + m_width_colon;
     }
     tw += m_width_dbl_digit + m_width_colon; // min
     tw += m_width_dbl_digit; // sec
