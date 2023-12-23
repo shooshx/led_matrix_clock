@@ -7,6 +7,7 @@
 
 #include "Adafruit_GFX.h"
 #include "../clock/my_fonts/fonts_index.h"
+#include "../clock/drawer.h"
 
 // https://stackoverflow.com/questions/2442576/how-does-one-convert-16-bit-rgb565-to-24-bit-rgb888
 uint16_t color565(uint8_t R8, uint8_t G8, uint8_t B8) 
@@ -34,16 +35,40 @@ std::vector<uint8_t> color888v(uint32_t v)
     return std::vector<uint8_t>{r, g, b};
 }
 
+
+class JsDraw : public IDraw //, public std::enable_shared_from_this<JsDraw> 
+{
+public:
+    JsDraw(emscripten::val jcanvas) : m_jcanvas(jcanvas)
+    {
+        //jcanvas.set("drawer", emscripten::val(shared_from_this()));
+    }
+    void setPixel(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b) override {
+        m_jcanvas.call<void>("setPixel", x, y, r, g, b);
+    }
+    void flush() override {
+    }
+    void clear() override {
+    }
+private:
+    emscripten::val m_jcanvas;
+};
+
+
 class JsDisplay : public Adafruit_GFX
 {
 public:
-    JsDisplay(emscripten::val canvas, int w, int h) :Adafruit_GFX(w, h), m_canvas(canvas)
+    JsDisplay(int w, int h) :Adafruit_GFX(w, h)
     {}
     void drawPixel(int16_t x, int16_t y, uint16_t color) override
     {
         //std::cout << "draw " << x << "," << y << " : " << color << std::endl;
         auto [r, g, b] = color888(color);
-        m_canvas.call<void>("setPixel", x, y, r, g, b);
+        m_drawer->setPixel(x, y, r, g, b);
+    }
+
+    void set_drawer(IDraw* drawer) {
+        m_drawer = drawer;
     }
 
     void print_str_at(int x, int y, const std::string& s, int align=0)
@@ -91,21 +116,34 @@ public:
     {
         fillScreen(m_backcol);
     }
+    void finish()
+    {
+        m_drawer->flush();
+    }
 
 private:
     uint16_t m_backcol = 0;
-    emscripten::val m_canvas;
+    IDraw* m_drawer = nullptr; // owned by the panel
 };
 
 
-void gfx_init_display(emscripten::val canvas, int w, int h)
+std::shared_ptr<JsDisplay> gfx_init_display(int w, int h)
 {
-    std::shared_ptr<JsDisplay> disp(new JsDisplay(canvas, w, h));
-    canvas.set("gfx", emscripten::val(disp));
+    std::shared_ptr<JsDisplay> disp(new JsDisplay(w, h));
     disp->setTextWrap(false);
 
     //disp->print("Hello");
+    return disp;
 }
+
+/*
+std::shared_ptr<JsDraw> make_js_drawer(emscripten::val wrapped) {
+    return std::make_shared<JsDraw>(wrapped);
+}
+
+std::shared_ptr<HaloDraw> make_halo_drawer(IDraw* wrap, int w, int h) {
+    return std::make_shared<HaloDraw>(wrap, w, h);
+}*/
 
 std::vector<std::string> gfx_get_fonts()
 {
@@ -121,26 +159,45 @@ std::vector<std::string> gfx_get_fonts()
 }
 
 
+
 // TODO support wider chars
 
 EMSCRIPTEN_BINDINGS(my_module)
 {
     using namespace emscripten;
     function("gfx_init_display", &gfx_init_display);
+    //function("make_drawer", &make_drawer);
     register_vector<std::string>("StringList");
     register_vector<uint8_t>("UInt8List");
     function("gfx_get_fonts", &gfx_get_fonts);
     function("color888v", &color888v);
     function("color565", &color565);
 
+    class_<IDraw>("IDraw")
+        .smart_ptr<std::shared_ptr<IDraw>>("IDraw")
+        .function("setPixel", &IDraw::setPixel)
+        ;
+
+    class_<JsDraw, base<IDraw>>("JsDraw")
+        .smart_ptr_constructor("JsDraw", &std::make_shared<JsDraw, emscripten::val>)
+        ;
+
+    class_<HaloDraw, base<IDraw>>("HaloDraw")
+        .smart_ptr_constructor("HaloDraw", &std::make_shared<HaloDraw, IDraw*, int, int>)
+        .function("setMyColor", &HaloDraw::setMyColor)
+        ;
+
     class_<JsDisplay>("JsDisplay")
         .smart_ptr<std::shared_ptr<JsDisplay>>("JsDisplay")
+        .function("drawPixel", &JsDisplay::drawPixel)
         .function("print_str_at", &JsDisplay::print_str_at)
         .function("set_text_color", &JsDisplay::set_text_color)
         .function("set_font", &JsDisplay::set_font)
         .function("clear", &JsDisplay::clear)
+        .function("finish", &JsDisplay::finish)
         .function("set_back_col", &JsDisplay::set_back_col)
         .function("calc_str_width", &JsDisplay::calc_str_width)
+        .function("set_drawer", &JsDisplay::set_drawer, allow_raw_pointers())
         ;
     
 }

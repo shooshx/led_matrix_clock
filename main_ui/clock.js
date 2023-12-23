@@ -2,8 +2,15 @@
 
 class ClockPanel
 {
-    constructor(name, pref_json)
+    constructor(name, pref_json, drawer, gfx, w, h)
     {
+        this.drawer = drawer
+        this.gfx = gfx
+        this.halo = new Module.HaloDraw(drawer, w, h)
+        this.halo.setMyColor(255, 0, 0)
+        //gfx.set_drawer(drawer)
+        gfx.set_drawer(this.halo)
+
         this.text1 = new TextBlock(name + "_t1", pref_json, "20:23:45")
         this.text2 = new TextBlock(name + "_t2", pref_json, "Fri 20/10/2023")
         this.show_seconds = NumProp.from_json(name + "_show_sec", pref_json)
@@ -23,10 +30,13 @@ class ClockPanel
         const utc = ld.getTime()
         const d = new Date(utc + 3600000*this.offset.v + ld.getTimezoneOffset()*60000)
 
+        let time = ""
+        const hour = d.getHours()
+        time += hour
         let min = d.getMinutes()
         if (min < 10)
             min = "0" + min
-        let time = d.getHours() + ":" + min
+        time += ":" + min
         if (this.show_seconds.v) {
             let sec = d.getSeconds()
             if (sec < 10)
@@ -77,38 +87,52 @@ class ClockPanel
         })
     }
 
-    draw(gfx)
+    draw()
     {
+        //this.gfx.set_font(-1)
+        //this.gfx.print_str_at(10,10, "`", ALIGN_LEFT)
+        //this.gfx.drawPixel(10, 10,0xffff);
+
         //gfx.set_back_col(this.back_color.r, this.back_color.g, this.back_color.b)
-        this.text1.draw(gfx)
-        this.text2.draw(gfx)
+        this.text1.draw(this.gfx)
+        this.text2.draw(this.gfx)
     }
 }
 
-function clock_create(parent, pref_json, ws, width, height)
+function time_generic_create(parent, pref_json, ws, width, height, PanelCls, pref_prefix)
 {
-    const clock = add_div(parent, 'sect_top')
-    const ctrl = add_div(clock, 'sect_ctrl')
-    const disp = add_div(clock, 'sect_disp')
-    const clock_canvas = new GfxCanvas(width, height, 5, disp, 0, "clock_canvas")
-    Module.gfx_init_display(clock_canvas, width, height)
-
-    const panel = new ClockPanel("p0", pref_json.clock)
+    const timer = add_div(parent, 'sect_top')
+    const ctrl = add_div(timer, 'sect_ctrl')
+    const disp = add_div(timer, 'sect_disp')
+    const canvas = new GfxCanvas(width, height, 5, disp, 0, 'timer_canvas')
+    const drawer = new Module.JsDraw(canvas)
+    const gfx = Module.gfx_init_display(width, height)
+    const panel = new PanelCls(pref_prefix, pref_json, drawer, gfx, width, height)
 
     const display = ()=>{
-        clock_canvas.gfx.clear()
-        panel.draw(clock_canvas.gfx)
-        clock_canvas.draw()
+        gfx.clear()
+        panel.draw()
+        gfx.finish()
+        canvas.draw()
     }
     const send_update = (name, value)=>{
         const cmd = "U " + name + " " + value
         ws.send(cmd)
     }
-
-    panel.add_ui(ctrl, display, send_update)
+    const send_cmd = (v)=>{
+        ws.send(v)
+    }
+    panel.add_ui(ctrl, display, send_update, send_cmd)
     panel.start_time(display)
-
     display()
+    return canvas
+}
+
+function clock_create(parent, pref_json, ws, width, height)
+{
+    const c = time_generic_create(parent, pref_json.clock, ws, width, height, ClockPanel, "p0")
+    c.log = true
+    return c
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -125,7 +149,7 @@ function format_time(d)
     const ms = Math.trunc(d / 100)
 
     let t = ""
-    if (h > 0)
+    if (h > 0) 
         t += h + ":"
     if (h > 0 && m < 10)
         t += "0"
@@ -168,7 +192,11 @@ function format_time_sp(d)
 
 class TimerPanel
 {
-    constructor(name, pref_json) {
+    constructor(name, pref_json, drawer, gfx) {
+        this.drawer = drawer
+        this.gfx = gfx
+        gfx.set_drawer(drawer)
+
         this.text1 = new ClockTextBlock(name + "_t1", pref_json)
         this.hours = NumProp.from_json(name + "_hours", pref_json)
         this.min = NumProp.from_json(name + "_min", pref_json)
@@ -275,38 +303,13 @@ class TimerPanel
 
     }
 
-    draw(gfx)
+    draw()
     {
-        this.text1.draw(gfx)
+        this.text1.draw(this.gfx)
     }
 }
 
-function time_generic_create(parent, pref_json, ws, width, height, PanelCls, pref_prefix)
-{
-    const timer = add_div(parent, 'sect_top')
-    const ctrl = add_div(timer, 'sect_ctrl')
-    const disp = add_div(timer, 'sect_disp')
-    const canvas = new GfxCanvas(width, height, 5, disp, 0, 'timer_canvas')
-    Module.gfx_init_display(canvas, width, height)
-    const panel = new PanelCls(pref_prefix, pref_json)
 
-    const display = ()=>{
-        canvas.gfx.clear()
-        panel.draw(canvas.gfx)
-        canvas.draw()
-    }
-    const send_update = (name, value)=>{
-        const cmd = "U " + name + " " + value
-        ws.send(cmd)
-    }
-    const send_cmd = (v)=>{
-        ws.send(v)
-    }
-    panel.add_ui(ctrl, display, send_update, send_cmd)
-    panel.start_time(display)
-    display()
-    return canvas
-}
 
 let timer_canvas = null
 
@@ -319,7 +322,11 @@ function timer_create(parent, pref_json, ws, width, height)
 
 class StopWPanel
 {
-    constructor(name, pref_json) {
+    constructor(name, pref_json, drawer, gfx) {
+        this.drawer = drawer
+        this.gfx = gfx
+        gfx.set_drawer(drawer)
+
         this.text1 = new ClockTextBlock(name + "_t1", pref_json, "20:23:45", ALIGN_RIGHT)
         this.is_running = false
         this.start_time_msec = -1
@@ -380,9 +387,9 @@ class StopWPanel
 
     }
 
-    draw(gfx)
+    draw()
     {
-        this.text1.draw(gfx)
+        this.text1.draw(this.gfx)
     }
 }
 
@@ -464,8 +471,14 @@ class LinearGradient
 }
 class DImgPanel
 {
-    constructor()
+    constructor(drawer, gfx, w, h)
     {
+        this.drawer = drawer
+        this.gfx = gfx
+        gfx.set_drawer(drawer)
+        this.w = w
+        this.h = h
+
         this.objs = [  new LinearGradient({r:255, g:0, b:0}, {x:0, y:0}, {r:0, g:0, b:0}, {x:63, y:0}, 10),
                        new LinearGradient({r:0, g:255, b:0}, {x:0, y:10}, {r:0, g:0, b:0}, {x:63, y:10}, 10), 
                        new LinearGradient({r:0, g:0, b:255}, {x:0, y:20}, {r:0, g:0, b:0}, {x:63, y:20}, 10)
@@ -482,14 +495,14 @@ class DImgPanel
         for(let obj of this.objs)
             obj.add_ui(ctrl, display_cb, send_update)
     }
-    draw(gfx, w, h)
+    draw()
     {
+        const w = this.w, h = this.h
         this.make_image(w, h)
-        let i = 0;
         for(let x = 0; x < w; ++x)
             for(let y = 0; y < h; ++y) {
                 const [r, g, b] = this.img.get(x, y)
-                gfx.setPixel(x, y, r, g, b)
+                this.drawer.setPixel(x, y, r, g, b)
             }
     }
 }
@@ -499,10 +512,11 @@ function draw_image_create(parent, width, height, ws)
     const dimg = add_div(parent, 'dimg_top')
     const ctrl = add_div(dimg, 'dimg_ctrl')
     const disp = add_div(dimg, 'dimg_disp')
-    const dimg_canvas = new GfxCanvas(width, height, 5, disp, 0, 'dimg_canvas')
-    Module.gfx_init_display(dimg_canvas, width, height)
+    const canvas = new GfxCanvas(width, height, 5, disp, 0, 'dimg_canvas')
+    const drawer = new Module.JsDraw(canvas)
+    const gfx = Module.gfx_init_display(width, height)
 
-    let panel = new DImgPanel()
+    let panel = new DImgPanel(drawer, gfx, width, height)
     let last_img = null
 
     window.setInterval(()=>{
@@ -518,9 +532,9 @@ function draw_image_create(parent, width, height, ws)
     }, 500)
 
     const display = ()=>{
-        dimg_canvas.gfx.clear()
-        panel.draw(dimg_canvas, width, height)
-        dimg_canvas.draw()        
+        gfx.clear()
+        panel.draw()
+        canvas.draw()        
     }
     const send_update = ()=>{
         last_img = panel.img

@@ -2,7 +2,8 @@
 #include "Prop.h"
 #include "base_utils.h"
 
-extern PxMATRIX display;
+extern WrapGFX display;
+extern PxMATRIX matrix_drawer;
 
 struct Rect
 {
@@ -155,7 +156,7 @@ struct ClockTextBlock : public TextBlockN<1>
     int tw = 0; // total width
     if (!m_hour.empty()) {
       if (m_hour.size() == 1)
-        tw += m_width_single_digit + m_width_colon;
+        tw += m_F + m_width_colon;
       else
         tw += m_width_dbl_digit + m_width_colon;
     }
@@ -168,6 +169,8 @@ struct ClockTextBlock : public TextBlockN<1>
     int y = m_y.get();
     
     if (!m_hour.empty()) {
+      if (m_hour.size() == 1)
+        x += m_width_single_digit;
       print_str_at(x, y, m_hour);
       if (m_hour.size() == 1)
         x += m_width_single_digit;
@@ -202,7 +205,7 @@ const char * short_days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"} ;
 const char * months[] = {"Jan", "Feb", "Mar", "Apr", "May", "June", "July", "Aug", "Sep", "Oct", "Nov", "Dec"} ;
 const char * ampm[] = {"AM", "PM"}; 
 
-struct ClockPanel : public PropHolder<6>
+struct ClockPanel : public PropHolder<6>, public BasePanel
 {
     String m_name;
     TextBlock m_time_text;  // time
@@ -273,7 +276,11 @@ struct ClockPanel : public PropHolder<6>
     void draw(time_t utcTime)
     {
         Timer t;
-        display.clearDisplay();
+        //display.clearDisplay();
+        drawBack();
+        // set the halo drawer only after drawing the back so that the back drawing doesn't go to it
+        display.setDrawer(&m_halo_drawer);
+
         auto tc = t.restart();
         //display.fillScreen(m_back_color.get());
         time_to_strings(utcTime);
@@ -286,11 +293,12 @@ struct ClockPanel : public PropHolder<6>
 
 };
 
-class ClockState
+class ClockState : public IScreen
 {
 public:
     ClockPanel m_panel;
     Preferences m_pref;
+    unsigned long m_epoch_time = 0;
 
 public:
     ClockState(NamesIndex* prop_map)
@@ -313,9 +321,9 @@ public:
         m_panel.toJson(obj);
     }
     
-    void draw(time_t utcTime)
+    void draw() override
     {
-        m_panel.draw(utcTime);
+        m_panel.draw(m_epoch_time);
     }
 
 

@@ -95,9 +95,11 @@ public:
     void load(Preferences& pref) override {
         for(int i = 0; i < m_sz; ++i)
             m_arr[i]->load(pref);
+        child_changed();
     }
     // called on save() whenever one of my children is changed
     virtual void child_changed() {}
+    
     bool save(Preferences& pref) override {
         bool any_saved = false;
         for(int i = 0; i < m_sz; ++i)

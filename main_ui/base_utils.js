@@ -29,6 +29,7 @@ class GfxCanvas
         this.scale = scale
         this.canvas_width = w*scale + extra_sz
         this.canvas_height = h*scale + extra_sz
+        this.log = false
 
         this.canvas = add_elem(parent_elem, 'canvas', ['gfx_canvas', canvas_name])
         this.canvas.setAttribute('id', canvas_name)
@@ -53,6 +54,8 @@ class GfxCanvas
     {
         if (x < 0 || y < 0 || x >= this.width || y >= this.height)
             return
+        //if (this.log && (r != 0 || g != 0 || b != 0))
+        //    console.log("jgfx " + x + "," + y + " - " + r + "," + g + "," + b)
         let i = (y * this.width + x)*4
         this.pixels[i] = r
         this.pixels[i+1] = g
@@ -64,6 +67,8 @@ class GfxCanvas
 
     draw()
     {
+        //if (this.log)
+        //    console.log("jgfx draw")
         this.ctx.fillStyle = '#000000'
         this.ctx.fillRect(0, 0, this.canvas_width, this.canvas_height)
         this.shadow_ctx.putImageData(this.image_data, 0, 0);
@@ -364,10 +369,7 @@ class ClockTextBlock extends TextBlock
         // this.x is the center of the string, calc to total width
         let tw = 0;
         if (this.hour !== null) {
-            if (this.hour.length == 1)
-                tw += this.width_single_digit + this.width_colon
-            else
-                tw += this.width_dbl_digit + this.width_colon
+            tw += this.width_dbl_digit + this.width_colon
         }
         tw += this.width_dbl_digit + this.width_colon // min
         tw += this.width_dbl_digit  // sec
@@ -379,6 +381,8 @@ class ClockTextBlock extends TextBlock
 
         gfx.set_text_color(this.color.r, this.color.g, this.color.b)
         if (this.hour !== null) {
+            if (this.hour.length == 1)
+                x += this.width_single_digit
             //this.print_pair(gfx, x, this.hour)
             gfx.print_str_at(x, this.y.v, this.hour, ALIGN_LEFT)
             if (this.hour.length == 1)

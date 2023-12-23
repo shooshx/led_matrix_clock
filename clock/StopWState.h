@@ -72,7 +72,7 @@ struct StopWPanel : public PropHolder<1>
 };
 
 
-class StopWState
+class StopWState : public IScreen
 {
 public:
     StopWPanel m_panel;
@@ -99,7 +99,7 @@ public:
         m_panel.toJson(obj);
     }
     
-    void draw()
+    void draw() override
     {
         m_panel.draw();
     }

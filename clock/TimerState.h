@@ -59,6 +59,7 @@ struct TimerPanel : public PropHolder<6>
   void child_changed() override {
     set_time();
     m_force_draw = true;
+    //Serial.printf("Timer: child_changed %d\n", m_cur_diff_msec);
   }
 
   // called in loop to update the text
@@ -75,7 +76,7 @@ struct TimerPanel : public PropHolder<6>
     }
     if (m_cur_diff_msec == m_last_draw_diff_msec && !m_force_draw)
       return false;
-    //Serial.printf("Timer: update_time\n");   
+    //Serial.printf("Timer: update_time %d  force=%d\n", m_cur_diff_msec, (int)m_force_draw);   
     m_force_draw = false;
 
     
@@ -97,7 +98,7 @@ struct TimerPanel : public PropHolder<6>
 };
 
 
-class TimerState
+class TimerState : public IScreen
 {
 public:
     TimerPanel m_panel;
@@ -124,7 +125,7 @@ public:
         m_panel.toJson(obj);
     }
     
-    void draw()
+    void draw() override
     {
         m_panel.draw();
     }

@@ -44,6 +44,9 @@ class Pref:
                 assert k not in self.index, f"duplicate key in prop index {k}"
                 self.index[k] = p
         return curd
+    
+    def dumps(self):
+        return json.dumps(self, default=json_default).encode('utf-8')
 
 def json_default(obj):
     if isinstance(obj, Prop) or isinstance(obj, Pref):
@@ -55,7 +58,7 @@ g_pref = None
 class JsonPrefHandler:
     def do_GET(self, handler):
         if handler.path.startswith("/pref"):
-            jstr = json.dumps(g_pref, default=json_default).encode('utf-8')
+            jstr = g_pref.dumps()
             handler.send_response(HTTPStatus.OK)
             handler.send_header("Content-type", "application/json")
             handler.send_header("Content-Length", len(jstr))
@@ -66,6 +69,9 @@ class JsonPrefHandler:
         return False
                        
 g_pref_handler = JsonPrefHandler()
+
+PREF_CUR = os.path.join(this_dir, "..", "main_ui", "pref.current")
+PREF_DEFAULT = os.path.join(this_dir, "..", "main_ui", "pref.dummy")
 
 class WSPrefHandler(HTTPWebSocketsHandler):
     def get_ex_handler(self):
@@ -81,13 +87,12 @@ class WSPrefHandler(HTTPWebSocketsHandler):
         if sp[0] == 'U':
             key = sp[1]
             value = sp[2]
-            g_pref.index[key].d = value
+            g_pref.index[key].d = int(value)
+            open(PREF_CUR, "wb").write(g_pref.dumps())
         elif sp[0] == 'D':
             pass
         else:
             self.log_message(f"WS unknown command '{sp[0]}' in {message}")
-
-
 
     def on_ws_connected(self):
         self.log_message('%s','websocket connected')
@@ -103,7 +108,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 def main():
     global g_pref
-    g_pref = Pref(json.load(open(os.path.join(this_dir, "..", "main_ui", "pref.dummy"))))
+    g_pref = Pref(json.load(open(PREF_CUR if os.path.exists(PREF_CUR) else PREF_DEFAULT)))
     try:
         #Replace WSSimpleEcho with your own subclass of HTTPWebSocketHandler
         server = ThreadedHTTPServer(('', port), WSPrefHandler)

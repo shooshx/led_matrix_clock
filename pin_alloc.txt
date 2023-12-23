@@ -1,0 +1,36 @@
+free
+IO35
+IO33  - orange of sound
+IO34
+IO26
+SD3 (GPIO10)
+IO21
+IO27 (GPIO27)-- yellow of sound
+SD0 (GPIO7)
+IO25 
+IO32
+TDI (GPIO12) - connected to INT
+IO4 - connected to 7 on the line
+IO0 - connected to 8
+IO2
+TXD (GPIO1) - connected to pin 1 above D1 text
+RXD (GPIO3) - connected to pin 2
+IO17 - connected to pin 5
+
+
+pin 3 is GND
+pin 4 is 3.3
+pin 6 is IO16??
+
+
+taken
+IO18
+IO19
+IO22
+IO23
+IO5
+TDO (GPIO15)
+IO16
+TMS (GPIO14)
+TCK (GPIO13)
+

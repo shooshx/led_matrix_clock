@@ -145,3 +145,53 @@ void format_time_sp(time_t tmsec, std::string& shour, std::string& smin, std::st
     
     stsec = two_digit_str(ms);
 }
+
+extern WrapGFX display;
+extern PxMATRIX matrix_drawer;
+
+
+class IScreen
+{
+public:
+    virtual void draw() = 0;
+};
+
+class BasePanel
+{
+public:
+    HaloDraw m_halo_drawer;
+    
+    uint8_t m_r = 40;
+    uint8_t m_g = 40;
+    uint8_t m_b = 0;
+public:
+    BasePanel() : m_halo_drawer(&matrix_drawer, display.width(), display.height())
+    {
+    }
+
+    void setColor(uint8_t r, uint8_t g, uint8_t b) {
+      m_r = r; m_g = g; m_b = b;
+    }
+
+    void drawBack() {
+        if (false) {
+            display.clearDisplay();
+        }
+        else {
+            solid_color();
+        }
+    }
+
+    void solid_color() {
+        int16_t w = display.width();
+        int16_t h = display.height();
+        //Serial.printf("solid %d,%d - %d,%d,%d\n", (int)w, (int)h, (int)m_r, (int)m_g, (int)m_b);
+
+        for(int16_t y = 0; y < h; ++y) {
+            for(int16_t x = 0; x < w; ++x) {
+                display.drawPixel(x, y, m_r, m_g, m_b);
+            }
+        }
+    }
+
+};

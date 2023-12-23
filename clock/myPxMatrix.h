@@ -122,7 +122,49 @@ enum color_orders {RRGGBB, RRBBGG, GGRRBB, GGBBRR, BBRRGG, BBGGRR};
 #define color_third_step (int(color_step / 3))
 #define color_two_third_step (int(color_third_step*2))
 
-class PxMATRIX : public Adafruit_GFX {
+// allow compiler to produce more optimized code
+#define _row_pattern (8)
+
+class WrapGFX : public Adafruit_GFX {
+public:
+    WrapGFX(uint16_t width, uint16_t height) : Adafruit_GFX(width+ADAFRUIT_GFX_EXTRA, height)
+    {}
+    
+    void drawPixel(int16_t x, int16_t y, uint16_t color) override {
+        if (m_drawer == nullptr)
+            return;
+        uint8_t r = ((((color >> 11) & 0x1F) * 527) + 23) >> 6;
+        uint8_t g = ((((color >> 5) & 0x3F) * 259) + 33) >> 6;
+        uint8_t b = (((color & 0x1F) * 527) + 23) >> 6;
+
+        m_drawer->setPixel(x, y, r, g, b);
+    }
+
+    void drawPixel(int16_t x, int16_t y, uint8_t r, uint8_t g, uint8_t b) {
+        m_drawer->setPixel(x, y, r, g, b);
+    }
+
+    void clearDisplay() {
+        m_drawer->clear();
+    }
+
+    void finish() {
+        //Serial.printf("wrap finish\n");
+        if (m_drawer == nullptr)
+            return;
+        m_drawer->flush();
+    }
+
+    void setDrawer(IDraw* drawer) {
+        m_drawer = drawer;
+    }
+
+private:
+    IDraw* m_drawer = nullptr;
+};
+
+class PxMATRIX : public IDraw
+{
  public:
   inline PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t OE, uint8_t A,uint8_t B);
   inline PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t OE, uint8_t A,uint8_t B,uint8_t C);
@@ -133,6 +175,9 @@ class PxMATRIX : public Adafruit_GFX {
   inline void begin(uint8_t row_pattern);
   inline void begin();
 
+  void clear() override {
+    clearDisplay();
+  }
   inline void clearDisplay(void);
   inline void clearDisplay(bool selected_buffer);
 
@@ -143,12 +188,17 @@ class PxMATRIX : public Adafruit_GFX {
   // Draw pixels
   inline void drawPixelRGB565(int16_t x, int16_t y, uint16_t color);
 
-  inline void drawPixel(int16_t x, int16_t y, uint16_t color);
+  //inline void drawPixel(int16_t x, int16_t y, uint16_t color);
+
+  void setPixel(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b) override {
+      drawPixelRGB888(x, y, r, g, b);
+  }
+  void flush() {
+      showBuffer();
+  }
 
   inline void drawPixelRGB888(int16_t x, int16_t y, uint8_t r, uint8_t g,uint8_t b);
 
-  // Does nothing for now (always returns 0)
-  uint8_t getPixel(int8_t x, int8_t y);
 
   // Converts RGB888 to RGB565
   uint16_t color565(uint8_t r, uint8_t g, uint8_t b);
@@ -207,6 +257,13 @@ class PxMATRIX : public Adafruit_GFX {
   // Set driver chip type
   inline void setDriverChip(driver_chips driver_chip);
 
+  inline int16_t getWidth() const { 
+    return _width;
+  }
+  inline int16_t getHeight() const { 
+    return _height;
+  }
+
  private:
 
  // the display buffer for the LED matrix
@@ -252,7 +309,7 @@ class PxMATRIX : public Adafruit_GFX {
   uint32_t *_row_offset;
 
   // Holds the display row pattern type
-  uint8_t _row_pattern;
+  //uint8_t _row_pattern;
 
   // Number of bytes in one color
   uint8_t _pattern_color_bytes;
@@ -353,7 +410,7 @@ inline void PxMATRIX::init(uint16_t width, uint16_t height,uint8_t LATCH, uint8_
   _flip=0;
   _fast_update=0;
 
-  _row_pattern=0;
+  //_row_pattern=0;
   _scan_pattern=LINE;
   _block_pattern=ABCD;
   _driver_chip=SHIFT;
@@ -404,25 +461,25 @@ inline void PxMATRIX::setBrightness(uint8_t brightness) {
 }
 
 
-inline PxMATRIX::PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t OE, uint8_t A,uint8_t B) : Adafruit_GFX(width+ADAFRUIT_GFX_EXTRA, height)
+inline PxMATRIX::PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t OE, uint8_t A,uint8_t B) 
 {
   init(width, height, LATCH, OE, A, B);
 }
 
-inline PxMATRIX::PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t OE, uint8_t A,uint8_t B,uint8_t C) : Adafruit_GFX(width+ADAFRUIT_GFX_EXTRA, height)
+inline PxMATRIX::PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t OE, uint8_t A,uint8_t B,uint8_t C)
 {
   _C_PIN = C;
   init(width, height, LATCH, OE, A, B);
 }
 
-inline PxMATRIX::PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t OE, uint8_t A,uint8_t B,uint8_t C,uint8_t D) : Adafruit_GFX(width+ADAFRUIT_GFX_EXTRA, height)
+inline PxMATRIX::PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t OE, uint8_t A,uint8_t B,uint8_t C,uint8_t D)
 {
   _C_PIN = C;
   _D_PIN = D;
   init(width, height, LATCH, OE, A, B);
 }
 
-inline PxMATRIX::PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t OE, uint8_t A,uint8_t B,uint8_t C,uint8_t D, uint8_t E) : Adafruit_GFX(width+ADAFRUIT_GFX_EXTRA, height)
+inline PxMATRIX::PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t OE, uint8_t A,uint8_t B,uint8_t C,uint8_t D, uint8_t E)
 {
   _C_PIN = C;
   _D_PIN = D;
@@ -430,9 +487,6 @@ inline PxMATRIX::PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t
   init(width, height, LATCH, OE, A, B);
 }
 
-inline void PxMATRIX::drawPixel(int16_t x, int16_t y, uint16_t color) {
-  drawPixelRGB565(x, y, color);
-}
 
 inline void PxMATRIX::showBuffer() {
   _active_buffer=!_active_buffer;
@@ -455,6 +509,7 @@ inline void PxMATRIX::copyBuffer(bool reverse = false) {
 
 inline void PxMATRIX::fillMatrixBuffer(int16_t x, int16_t y, uint8_t r, uint8_t g, uint8_t b,bool selected_buffer)
 {   
+#if 0  
   if (_rotate){
     uint16_t temp_x=x;
     x=y;
@@ -464,7 +519,9 @@ inline void PxMATRIX::fillMatrixBuffer(int16_t x, int16_t y, uint8_t r, uint8_t 
   // Panels are naturally flipped
   if (!_flip)
     x =_width - 1 -x;
-  
+#endif
+  x =_width - 1 -x;
+
   if ((x < 0) || (x >= _width) || (y < 0) || (y >= _height))
     return; 
   
@@ -546,10 +603,6 @@ inline void PxMATRIX::drawPixelRGB888(int16_t x, int16_t y, uint8_t r, uint8_t g
 #endif
 }
 
-// the most basic function, get a single pixel
-inline uint8_t PxMATRIX::getPixel(int8_t x, int8_t y) {
-  return (0);//PxMATRIX_buffer[x+ (y/8)*LCDWIDTH] >> (y%8)) & 0x1;
-}
 
 inline void PxMATRIX::begin()
 {
@@ -583,9 +636,12 @@ void PxMATRIX::spi_init(){
 
 }
 
-void PxMATRIX::begin(uint8_t row_pattern) {
-
-  _row_pattern=row_pattern;
+void PxMATRIX::begin(uint8_t row_pattern) 
+{
+  if (row_pattern != _row_pattern) {
+    Serial.printf("Wrong row_pattern! %d\n", row_pattern);
+  }
+  //_row_pattern=row_pattern;
 
   _mux_pattern = BINARY;
   _color_order=RRGGBB;
@@ -882,6 +938,7 @@ void PxMATRIX::clearDisplay(void) {
 
 // clear everything
 void PxMATRIX::clearDisplay(bool selected_buffer) {
+    //Serial.printf("clearDisplay %d\n", (int)selected_buffer);
 #ifdef PxMATRIX_DOUBLE_BUFFER
   if(selected_buffer)
     memset(PxMATRIX_buffer2, 0, PxMATRIX_COLOR_DEPTH*_buffer_size);

@@ -13,6 +13,7 @@
 //#include "SPIFFS.h"
 #include <Preferences.h>
 
+#include "drawer.h"
 #include <ArduinoJson.h>
 //#include <PxMatrix.h>
 #define double_buffer
@@ -28,7 +29,7 @@
 
 // Replace with your network credentials
 const char* SSID = "TheCatsMew";
-const char* PASSW = "abcdeg123458";
+const char* PASSW = "";
 
 //int LED_BUILTIN = 2;
 
@@ -52,7 +53,8 @@ NTPClient timeClient(ntpUDP);
 #define P_E 15
 #define P_OE 2
 
-PxMATRIX display(DISPLAY_WIDTH,DISPLAY_HEIGHT,P_LAT, P_OE,P_A,P_B,P_C,P_D);
+WrapGFX display(DISPLAY_WIDTH,DISPLAY_HEIGHT);
+PxMATRIX matrix_drawer(DISPLAY_WIDTH,DISPLAY_HEIGHT,P_LAT, P_OE,P_A,P_B,P_C,P_D);
 
 SerialMp3Player sound_player;
 
@@ -242,47 +244,7 @@ void set_builtin_led(bool v)
     digitalWrite(LED_BUILTIN, 0);  
 }
 
-struct PixParse
-{
-    int i = 0;
-    int state = 0;
-    int expect_count = 0;
-    int count = 0;
-    int x = 0, y = 0, col = 0;
 
-    void operator()(const char* s) {
-        //Serial.printf("PP `%s` - %d, %d, %d\n", s, i, state, count);
-        if (i == 0) {
-            ++i;  // command
-            return;
-        }
-        if (i == 1) {
-            expect_count = atoi(s);
-            ++i;  // pixel count
-            return;
-        }
-        if (state == 0)
-            x = atoi(s);
-        else if (state == 1)
-            y = atoi(s);
-        else {
-            col = atoi(s);
-            display.drawPixel(x, y, col);
-            Serial.printf("PP-draw %d,%d, %d\n", x, y, col);
-            ++count;
-        }
-        state = (state + 1) % 3;
-        ++i;
-    }
-};
-
-void parse_pixel_cmd_t(String& line)
-{
-    PixParse pp;
-    strSplitStream(line, pp);
-    if (pp.count != pp.expect_count)
-        Serial.printf("draw command parsed unexpected number of pixels %d, %d\n", pp.count, pp.expect_count);
-}
 
 struct PixelDat {
   uint8_t x;
@@ -305,15 +267,17 @@ void parse_pixel_cmd(const std::vector<uint8_t>& v)
     Serial.printf("pixel_cmd unexpected size2 %d, %d\n", v.size(), sz);
     return;
   }
+
+  matrix_drawer.copyBuffer();
+  
   int offset = 6;
-  display.copyBuffer();
   for(int i = 0; i < sz; ++i) {
     PixelDat* p = (PixelDat*)&v[offset];
     offset += 5;
-    display.drawPixelRGB888(p->x, p->y, p->r, p->g, p->b);
+    display.drawPixel(p->x, p->y, p->r, p->g, p->b);
     //Serial.printf("PP-draw %d,%d, %x-%x-%x\n", p->x, p->y, p->r, p->g, p->b);
   }
-  display.showBuffer();
+  display.finish();
 }
 
 void parse_img_cmd(const std::vector<uint8_t>& v)
@@ -332,12 +296,12 @@ void parse_img_cmd(const std::vector<uint8_t>& v)
     Serial.printf("img_cmd wrong size3 %d, %d, %d\n", sz, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     return;
   }
-  display.copyBuffer();
+  matrix_drawer.copyBuffer();
   
   int offset = 6;
   int x = 0, y = 0;
   for(int i = 0; i < sz; ++i) {
-    display.drawPixelRGB888(x, y, v[offset], v[offset+1], v[offset+2]);
+    display.drawPixel(x, y, v[offset], v[offset+1], v[offset+2]);
     offset += 3;
     ++x;
     if (x >= DISPLAY_WIDTH) {
@@ -345,7 +309,7 @@ void parse_img_cmd(const std::vector<uint8_t>& v)
       ++y;
     }
   }
-  display.showBuffer();
+  display.finish();
   //Serial.printf("img_cmd done %d\n", sz);
 }
 
@@ -387,7 +351,7 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
             parse_pixel_cmd(v);        
         else if (subcmd == 'C') {
             display.clearDisplay();
-            display.showBuffer();
+            display.finish();
         }
         else if (subcmd == 'I')
             parse_img_cmd(v);
@@ -567,7 +531,7 @@ void displayUpdateTask(void *)
   for(;;){
     //block here untill timer ISR unblocks task
     if (ulTaskNotifyTake( pdTRUE, portMAX_DELAY)){
-        display.display(70);
+        matrix_drawer.display(70);
         //vTaskDelay( 1 );
     }
   }
@@ -593,24 +557,19 @@ void setupDisplayISR()
 }
 
 
-
-
-uint16_t myCYAN = display.color565(0, 255, 255);
-uint16_t myRED = display.color565(255, 0, 0);
-
 void setupDisplay() 
 {
-  display.begin(8);
-  display.setFastUpdate(true);
-  display.setPanelsWidth(2);
-  display.clearDisplay();
-  display.flushDisplay();
+  matrix_drawer.begin(8);
+  matrix_drawer.setFastUpdate(true);
+  matrix_drawer.setPanelsWidth(2);
+  matrix_drawer.clearDisplay();
+  matrix_drawer.flushDisplay();
 
-  display.setTextColor(myCYAN);
+  display.setTextColor(matrix_drawer.color565(0, 255, 255));
   display.setCursor(2,0);
   display.print("Pixel");
   display.setTextWrap(false);
-  display.showBuffer();
+  display.finish();
 
   setupDisplayISR();
   //setupDisplayISR_old();
@@ -656,6 +615,7 @@ bool updateTime()
   }
   unsigned long prevEpochTime = g_epoch_time;
   g_epoch_time =  timeClient.getEpochTime();
+  state->clock_state.m_epoch_time = g_epoch_time;
   return (g_epoch_time != prevEpochTime);
 }
 
@@ -670,43 +630,38 @@ void loop(void)
   ++g_loop_count;
   int section = state->top.active_section.get();
   bool section_changed = (section != g_prev_section);
-  display.setBrightness(state->top.brightness.get());
+  g_prev_section = section;
   
-  bool time_changed = updateTime(); // TODO: needed this often?
+  matrix_drawer.setBrightness(state->top.brightness.get());
+  display.setDrawer(&matrix_drawer);
+  
+  bool time_changed = updateTime();
+  bool timer_need_draw = state->timer.m_panel.update_time();
+  bool stopw_need_draw = state->stopw.m_panel.update_time();
+
+  IScreen* screen = nullptr;
 
   if ((time_changed || section_changed) && section == SECTION_CLOCK)
   {
-    Timer t;
-    
-    time_t utc = g_epoch_time;
-    //time_t local = utc + tzOffset * 3600;
-    if (has_display)
-    {
-        state->clock_state.draw(utc);
-        display.showBuffer();
-        // time passing indicator pixel
-        //display.drawPixel(0, epochTime % 32, 0xffff);
-    }
-
-    Serial.printf("draw took %d loops:%d\n", t.elapsed(), g_loop_count - g_last_count);
-    g_last_count = g_loop_count;
+    screen = &state->clock_state;
   }
 
-  bool timer_need_draw = state->timer.m_panel.update_time();
   if ((timer_need_draw || section_changed) && section == SECTION_TIMER)
   {
-    state->timer.m_panel.draw();
-    display.showBuffer();
+    screen = &state->timer;
   }
 
-  bool stopw_need_draw = state->stopw.m_panel.update_time();
   if ((stopw_need_draw || section_changed) && section == SECTION_STOPW)
   {
-    state->stopw.m_panel.draw();
-    display.showBuffer();
+    screen = &state->stopw;
   }
 
-  g_prev_section = section;
+  if (screen != nullptr) {
+    screen->draw();
+    display.finish();
+  }
+
+  
 
   ws.cleanupClients();
   /*
@@ -716,3 +671,15 @@ void loop(void)
   delay(500);
   */
 }
+
+
+/*
+    //Timer t;
+    screen = &state->clock_state;
+
+    // time passing indicator pixel
+    //display.drawPixel(0, epochTime % 32, 0xffff);
+
+    //Serial.printf("draw took %d loops:%d\n", t.elapsed(), g_loop_count - g_last_count);
+    //g_last_count = g_loop_count;
+*/

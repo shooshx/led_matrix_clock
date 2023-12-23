@@ -8,7 +8,6 @@ instructions:
 
 
 TODO:
-- sound
 - animations for timer, stop watch (cursor?)
 - timer alarm changes active_section
 - after some time with of inactivity go back to clock
@@ -27,11 +26,8 @@ sprites:
 TODO: 
 wasm mime type  in WebResponses.cpp
 
-fast update?
-OE pin?
-latch?
 
 read about priorities in RTOS
-double buffering?
+
 
 just reimpl the file handler to lock
