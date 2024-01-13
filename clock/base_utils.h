@@ -74,16 +74,21 @@ struct Timer
     }
 };
 
+void separate_time(time_t tmsec, int& h, int& m, int& s, int& ms) {
+    int64_t d = tmsec;
+    h = trunc(d / (60*60*1000));
+    d -= h * (60*60*1000);
+    m = trunc(d / (60*1000));
+    d -= m * (60*1000);
+    s = trunc(d / 1000);
+    d -= s * 1000;
+    ms = trunc(d / 100);
+}
+
 String format_time(time_t tmsec)
 {
-    int64_t d = tmsec;
-    int h = trunc(d / (60*60*1000));
-    d -= h * (60*60*1000);
-    int m = trunc(d / (60*1000));
-    d -= m * (60*1000);
-    int s = trunc(d / 1000);
-    d -= s * 1000;
-    int ms = trunc(d / 100);
+    int h, m, s, ms;
+    separate_time(tmsec, h, m, s, ms);
 
     String t;
     if (h > 0) {
@@ -119,14 +124,8 @@ std::string two_digit_str(int n) {
 
 void format_time_sp(time_t tmsec, std::string& shour, std::string& smin, std::string& ssec, std::string& stsec)
 {
-    int64_t d = tmsec;
-    int h = trunc(d / (60*60*1000));
-    d -= h * (60*60*1000);
-    int m = trunc(d / (60*1000));
-    d -= m * (60*1000);
-    int s = trunc(d / 1000);
-    d -= s * 1000;
-    int ms = trunc(d / 100);
+    int h, m, s, ms;
+    separate_time(tmsec, h, m, s, ms);
 
     if (h > 0)
       shour = two_digit_str(h);
@@ -154,6 +153,13 @@ class IScreen
 {
 public:
     virtual void draw() = 0;
+
+    virtual void toggle_run(int v) {
+      Serial.printf("IScreen::toggle_run %d\n", v);
+    }
+    virtual void change(int v) {
+      Serial.printf("IScreen::change %d\n", v);
+    }
 };
 
 class BasePanel

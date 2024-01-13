@@ -33,6 +33,18 @@ struct TimerPanel : public PropHolder<6>
   int read_input() {
     return ((m_hour.get() * 60 + m_min.get()) * 60 + m_sec.get()) * 1000;
   }
+  
+  void change_input(int d_min) {
+    if (m_running)
+        return;
+    set_time();    
+    m_cur_diff_msec += d_min * 60 * 1000;
+    int h, m, s, ms;
+    separate_time(m_cur_diff_msec, h, m, s, ms);
+    m_hour.set(h);
+    m_min.set(m);
+    m_sec.set(s);
+  }
 
   void toggle_run(int v) {
     if (v == 2) // 2 means flip current state
@@ -91,7 +103,9 @@ struct TimerPanel : public PropHolder<6>
   }
 
   void draw() {
+    //Serial.printf("timer clear\n");
     display.clearDisplay();
+    //Serial.printf("timer text\n");
     m_timer_text.draw();
   }
   
@@ -128,5 +142,17 @@ public:
     void draw() override
     {
         m_panel.draw();
+    }
+
+    void toggle_run(int v) override
+    {
+        //Serial.printf("timer toggle %d\n", v);
+        m_panel.toggle_run(v);
+    }
+    void change(int v) override
+    {
+        //Serial.printf("timer change %d\n", v);
+        m_panel.change_input(v);
+        save();
     }
 };

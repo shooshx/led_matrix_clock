@@ -37,6 +37,12 @@ struct StopWPanel : public PropHolder<1>
     m_running = !m_running;
   }
 
+  void change_input(int d_min) {
+    if (m_running)
+        return;
+    reset();
+  }
+
   void reset() {
     m_cur_diff_msec = 0;
     if (!m_running) {
@@ -102,5 +108,15 @@ public:
     void draw() override
     {
         m_panel.draw();
+    }
+
+    void toggle_run(int v) override
+    {
+        m_panel.toggle_run(v);
+    }
+    void change(int v) override
+    {
+        m_panel.change_input(v);
+        save();
     }
 };

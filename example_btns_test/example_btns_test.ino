@@ -1,4 +1,29 @@
+#include "Buttons.h"
+
+Buttons buttons;
+
 void setup() {
+  Serial.begin(115200); 
+
+  auto click_handler = [](int pin) {
+    Serial.printf("click %d\n", pin);
+  };
+  auto long_press_handler = [](int pin) {
+    Serial.printf("long-press %d\n", pin);
+  };
+
+  buttons.setup( {
+    Button(4, click_handler, long_press_handler),
+    Button(0, click_handler, long_press_handler),
+    Button(17, click_handler, long_press_handler),
+    Button(12, click_handler, long_press_handler),
+    Button(26, click_handler, long_press_handler),
+  });
+  Serial.printf("did setup\n");
+}
+
+
+void setup_raw() {
   Serial.begin(115200);  
   
   pinMode(4, INPUT_PULLUP);
@@ -17,6 +42,9 @@ void doRead(int n) {
 }
 
 void loop() {
+  buttons.scan();
+  return;
+
   //Serial.printf("reading... ");
   doRead(4);
   doRead(0);

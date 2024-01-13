@@ -8,12 +8,13 @@ instructions:
 
 
 TODO:
-- animations for timer, stop watch (cursor?)
+- background animations for timer, stop watch (cursor?)
 - timer alarm changes active_section
 - after some time with of inactivity go back to clock
 - font editor
 - GPIO buttons
 - color offset in display?
+- write text
 - animations
     - game of life
     - plasma

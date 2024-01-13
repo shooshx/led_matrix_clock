@@ -141,10 +141,15 @@ public:
     }
 
     void drawPixel(int16_t x, int16_t y, uint8_t r, uint8_t g, uint8_t b) {
+        if (m_drawer == nullptr)
+            return;
         m_drawer->setPixel(x, y, r, g, b);
     }
 
     void clearDisplay() {
+        //Serial.printf("clearDisplay %p\n", m_drawer);
+        if (m_drawer == nullptr)
+            return;
         m_drawer->clear();
     }
 

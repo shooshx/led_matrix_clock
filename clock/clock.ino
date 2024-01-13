@@ -10,12 +10,10 @@
 #include <Time.h>
 #include <TimeLib.h>
 #include <LittleFS.h>
-//#include "SPIFFS.h"
 #include <Preferences.h>
 
 #include "drawer.h"
 #include <ArduinoJson.h>
-//#include <PxMatrix.h>
 #define double_buffer
 #include "myPxMatrix.h"
 #include "SerialMp3Player.h"
@@ -25,11 +23,18 @@
 #include "TimerState.h"
 #include "StopWState.h"
 #include "base_utils.h"
+#include "Buttons.h"
+
+#define DISPLAY_WIDTH 64
+#define DISPLAY_HEIGHT 32
+
+#include "image_handling.h"
 
 
 // Replace with your network credentials
-const char* SSID = "TheCatsMew";
-const char* PASSW = "";
+//const char* SSID = "TheCatsMew";
+//const char* PASSW = "abcdeg123458";
+
 
 //int LED_BUILTIN = 2;
 
@@ -40,10 +45,6 @@ AsyncWebSocket ws("/ws"); // access at ws://[esp ip]/ws
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
-
-
-#define DISPLAY_WIDTH 64
-#define DISPLAY_HEIGHT 32
 
 #define P_LAT 22
 #define P_A 19
@@ -62,6 +63,7 @@ bool has_display = false;
 bool has_serial = false;
 
 unsigned long g_epoch_time = 0;
+Buttons buttons;
 
 
 enum Section {
@@ -72,6 +74,9 @@ enum Section {
     SECTION_DRAW = 4,
     SECTION_IMAGE = 5
 };
+
+#define SECTION_BTN_FIRST SECTION_CLOCK
+#define SECTION_BTN_LAST SECTION_STOPW
 
 class TopState : public PropHolder<2>
 {
@@ -93,6 +98,22 @@ public:
     void save() {
         PropHolder::save(m_pref);
     }
+
+    void active_section_btn(int d) {
+      auto cur = active_section.get();
+      if (cur < SECTION_BTN_FIRST || cur > SECTION_BTN_LAST)
+        cur = SECTION_BTN_FIRST;
+      else {
+        cur += d;
+        if (cur > SECTION_BTN_LAST)
+          cur = SECTION_BTN_FIRST;
+        if (cur < SECTION_BTN_FIRST)
+          cur = SECTION_BTN_LAST;
+      }
+      Serial.printf("top section %d\n", cur);
+      active_section.set(cur);
+      save();
+    }
 };
 
 class State
@@ -103,6 +124,7 @@ public:
     TopState top;
     TimerState timer;
     StopWState stopw;
+    IScreen* m_cur_screen = nullptr;
 
     State()
         : clock_state(&m_prop_map)
@@ -245,73 +267,6 @@ void set_builtin_led(bool v)
 }
 
 
-
-struct PixelDat {
-  uint8_t x;
-  uint8_t y;
-  uint8_t r;
-  uint8_t g;
-  uint8_t b;
-};
-
-void parse_pixel_cmd(const std::vector<uint8_t>& v)
-{
-  //Serial.printf("parse_pixel %d\n", v.size());
-  if (v.size() < 6) {
-    Serial.printf("pixel_cmd unexpected size %d\n", v.size());
-    return;
-  }
-  uint32_t sz = 0;
-  memcpy(&sz, &v[2], sizeof(uint32_t));
-  if (v.size() != sz*5 + 6 + 1) { // +1 for null term that's added on parsing
-    Serial.printf("pixel_cmd unexpected size2 %d, %d\n", v.size(), sz);
-    return;
-  }
-
-  matrix_drawer.copyBuffer();
-  
-  int offset = 6;
-  for(int i = 0; i < sz; ++i) {
-    PixelDat* p = (PixelDat*)&v[offset];
-    offset += 5;
-    display.drawPixel(p->x, p->y, p->r, p->g, p->b);
-    //Serial.printf("PP-draw %d,%d, %x-%x-%x\n", p->x, p->y, p->r, p->g, p->b);
-  }
-  display.finish();
-}
-
-void parse_img_cmd(const std::vector<uint8_t>& v)
-{
-  if (v.size() < 6) {
-    Serial.printf("img_cmd unexpected size %d\n", v.size());
-    return;
-  }
-  uint32_t sz = 0;
-  memcpy(&sz, &v[2], sizeof(uint32_t));
-  if (v.size() != sz*3 + 6 + 1) { // +1 for null term that's added on parsing
-    Serial.printf("img_cmd unexpected size2 %d, %d\n", v.size(), sz);
-    return;
-  }
-  if (sz != DISPLAY_WIDTH * DISPLAY_HEIGHT) {
-    Serial.printf("img_cmd wrong size3 %d, %d, %d\n", sz, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-    return;
-  }
-  matrix_drawer.copyBuffer();
-  
-  int offset = 6;
-  int x = 0, y = 0;
-  for(int i = 0; i < sz; ++i) {
-    display.drawPixel(x, y, v[offset], v[offset+1], v[offset+2]);
-    offset += 3;
-    ++x;
-    if (x >= DISPLAY_WIDTH) {
-      x = 0;
-      ++y;
-    }
-  }
-  display.finish();
-  //Serial.printf("img_cmd done %d\n", sz);
-}
 
 
 void handleWebSocketMessage(const uint8_t *data, size_t len) 
@@ -590,6 +545,51 @@ void setupState()
 void setupSound()
 {
     sound_player.begin();
+    Serial.println("initialized sound");
+}
+
+#define BTN_LEFT 26
+#define BTN_RIGHT 17
+#define BTN_MID 4
+#define BTN_UP 12
+#define BTN_DOWN 0
+
+void setupButtons()
+{
+  auto click_handler = [](int pin) {
+    Serial.printf("click %d %p\n", pin, state->m_cur_screen);
+    switch(pin) {
+      case BTN_LEFT:  
+        state->top.active_section_btn(1); 
+        break;
+      case BTN_RIGHT: 
+        state->top.active_section_btn(-1); 
+        break;
+      case BTN_MID: 
+        if (state->m_cur_screen)
+          state->m_cur_screen->toggle_run(2);
+        break;
+      case BTN_UP:
+        if (state->m_cur_screen)
+          state->m_cur_screen->change(1);
+        break;
+      case BTN_DOWN:
+        if (state->m_cur_screen)
+          state->m_cur_screen->change(-1);
+        break;  
+    }
+  };
+  auto long_press_handler = [](int pin) {
+    Serial.printf("long-press %d\n", pin);
+  };
+
+  buttons.setup( {
+    Button(BTN_LEFT, click_handler, long_press_handler),
+    Button(BTN_RIGHT, click_handler, long_press_handler),
+    Button(BTN_MID, click_handler, long_press_handler),
+    Button(BTN_UP, click_handler, long_press_handler),
+    Button(BTN_DOWN, click_handler, long_press_handler),
+  });
 }
 
 void setup(void)
@@ -605,6 +605,7 @@ void setup(void)
 
   setupDisplay();
   setupSound();
+  setupButtons();
 }
 
 
@@ -628,12 +629,13 @@ int g_prev_section = -1;
 void loop(void)
 {
   ++g_loop_count;
+  //Serial.printf("Loop %d\n", g_loop_count);
   int section = state->top.active_section.get();
   bool section_changed = (section != g_prev_section);
   g_prev_section = section;
-  
-  matrix_drawer.setBrightness(state->top.brightness.get());
+
   display.setDrawer(&matrix_drawer);
+  matrix_drawer.setBrightness(state->top.brightness.get());
   
   bool time_changed = updateTime();
   bool timer_need_draw = state->timer.m_panel.update_time();
@@ -657,12 +659,15 @@ void loop(void)
   }
 
   if (screen != nullptr) {
+    state->m_cur_screen = screen;
+    //Serial.printf("draw %d %p\n", section, screen);
     screen->draw();
+    //Serial.printf("finish\n");
     display.finish();
   }
 
-  
-
+  //Serial.printf("r\n");
+  buttons.scan();
   ws.cleanupClients();
   /*
   digitalWrite(LED_BUILTIN, LOW);  
