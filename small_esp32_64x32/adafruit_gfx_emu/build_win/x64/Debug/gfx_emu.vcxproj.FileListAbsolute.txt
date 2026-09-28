@@ -1,0 +1,1 @@
+C:\Projects\led_matrix_clock\adafruit_gfx_emu\build_win\x64\Debug\gfx_emu.exe

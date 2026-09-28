@@ -1,0 +1,12 @@
+﻿  test.cpp
+C:\Projects\led_matrix_clock\adafruit_gfx_emu\build_win\test.cpp(11,21): warning C4267: 'argument': conversion from 'size_t' to 'unsigned int', possible loss of data
+C:\Projects\led_matrix_clock\adafruit_gfx_emu\build_win\test.cpp(13,16): warning C4267: 'argument': conversion from 'size_t' to 'unsigned int', possible loss of data
+C:\Projects\led_matrix_clock\adafruit_gfx_emu\build_win\test.cpp(23,30): warning C4267: '=': conversion from 'size_t' to 'int', possible loss of data
+C:\Projects\led_matrix_clock\adafruit_gfx_emu\build_win\test.cpp(35,1): warning C4267: 'argument': conversion from 'size_t' to 'unsigned int', possible loss of data
+C:\Projects\led_matrix_clock\adafruit_gfx_emu\build_win\test.cpp(85,10): message : see reference to function template instantiation 'int strSplitStream<main::<lambda_1>>(String &,const TF &)' being compiled
+          with
+          [
+              TF=main::<lambda_1>
+          ]
+C:\Projects\led_matrix_clock\adafruit_gfx_emu\build_win\test.cpp(35,1): warning C4267: '=': conversion from 'size_t' to 'int', possible loss of data
+  gfx_emu.vcxproj -> C:\Projects\led_matrix_clock\adafruit_gfx_emu\build_win\x64\Debug\gfx_emu.exe
