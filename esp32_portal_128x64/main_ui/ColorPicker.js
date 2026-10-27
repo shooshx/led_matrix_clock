@@ -707,19 +707,36 @@ function create_at(edit_elem, sz, onchange, options, start_value)
     }, options, start_value)
     picker.elem.style.position = "fixed"
     edit_elem.spellcheck = false
+    // no on-screen keyboard on phones / tablets, the picker opens instead.
+    // the box stays editable so that a hex value can be typed or pasted with a real keyboard
+    edit_elem.setAttribute('inputmode', 'none')
+    edit_elem.removeAttribute('readonly')
+    // the picker is position:fixed so these are window coordinates, without the page scroll.
+    // it's repositioned when the page scrolls so that it stays next to the edit box
     let position_to_edit_elem
     if (options.open_pos === OPEN_POS_LEFTOF_BOTTOM_LEFT) {
         position_to_edit_elem = ()=>{
             let ed_rect = edit_elem.getBoundingClientRect()
             picker.elem.style.top = ed_rect.bottom - sz + "px"
-            picker.elem.style.left = ed_rect.right + window.scrollX + 2 + "px"
+            picker.elem.style.left = ed_rect.right + 2 + "px"
         }
     }
     else { // where to open the picker, default, top-left corner is below element
         position_to_edit_elem = ()=>{
             let ed_rect = edit_elem.getBoundingClientRect()
-            picker.elem.style.top = ed_rect.bottom + window.scrollY + 2 + "px"
-            picker.elem.style.left = ed_rect.left + window.scrollX + "px"
+            picker.elem.style.top = ed_rect.bottom + 2 + "px"
+            picker.elem.style.left = ed_rect.left + "px"
+        }
+    }
+    // capture so that scrolling of any scrollable element is seen, not only the page
+    const follow = (v)=>{
+        if (v) {
+            window.addEventListener('scroll', position_to_edit_elem, true)
+            window.addEventListener('resize', position_to_edit_elem)
+        }
+        else {
+            window.removeEventListener('scroll', position_to_edit_elem, true)
+            window.removeEventListener('resize', position_to_edit_elem)
         }
     }
 
@@ -735,9 +752,10 @@ function create_at(edit_elem, sz, onchange, options, start_value)
     })
     
     options.myAddEventListener(edit_elem, "focus", function() { 
-        position_to_edit_elem(); 
+        position_to_edit_elem();
+        follow(true)
         overlay.set_visible(true)
-        picker.set_visible(true) 
+        picker.set_visible(true)
         if (options.focus_func)
             options.focus_func(true)
     })   
@@ -746,8 +764,9 @@ function create_at(edit_elem, sz, onchange, options, start_value)
     })
     if (!DEBUG_NO_BLUR) {
         options.myAddEventListener(overlay.elem, "click", function(e) {
-            picker.set_visible(false) 
+            picker.set_visible(false)
             overlay.set_visible(false)
+            follow(false)
             if (options.focus_func)
                 options.focus_func(false)  
         })

@@ -11,8 +11,6 @@
 <script src="prefs.js"></script>
 <script>
 
-const PX_WIDTH = 128
-const PX_HEIGHT = 64
 
 
 const DISCONNECTED = 0
@@ -60,9 +58,7 @@ class WsWrap {
             url = "wss://"
         else
             url = "ws://"
-        url += window.location.host
-        if (window.location.port.length > 0)
-            url += ":" + window.location.port
+        url += window.location.host // includes the port if there is one
         url += "/ws"
         console.log("ws url: ", url)
 
@@ -142,6 +138,11 @@ function add_glob_prop_ui(parent, prefJson, send_update)
 function create_ui(prefJson)
 {
     const active_section = prefJson['active_section'] || 0
+    // the orientation the panel stands in, the Draw and Image tabs are in its coordinates.
+    // they don't change if the panel turns while the page is open, it needs a reload
+    const portrait = ((prefJson['rotation'] || 0) & 1) != 0
+    const px_width = portrait ? PX_SHORT : PX_LONG
+    const px_height = portrait ? PX_LONG : PX_SHORT
     const send_update = (name, value)=>{
         const cmd = "U " + name + " " + value
         ws_wrap.send(cmd)
@@ -153,15 +154,15 @@ function create_ui(prefJson)
 
     const off_e = create_section(body, 'Off', active_section, send_off_update)
     const clk_e = create_section(body, 'Clock', active_section, send_update)
-    clock_create(clk_e, prefJson, ws_wrap, PX_WIDTH, PX_HEIGHT)
+    clock_create(clk_e, prefJson, ws_wrap, portrait)
     const timer_e = create_section(body, "Timer", active_section, send_update)
-    timer_create(timer_e, prefJson, ws_wrap, PX_WIDTH, PX_HEIGHT)
+    timer_create(timer_e, prefJson, ws_wrap, portrait)
 
     const stopw_e = create_section(body, "Stop Watch", active_section, send_update)
-    stop_watch_create(stopw_e, prefJson, ws_wrap, PX_WIDTH, PX_HEIGHT)
+    stop_watch_create(stopw_e, prefJson, ws_wrap, portrait)
 
     const draw_e = create_section(body, 'Draw', active_section, send_update)
-    draw_pixel_create(draw_e, PX_WIDTH, PX_HEIGHT, ws_wrap)
+    draw_pixel_create(draw_e, px_width, px_height, ws_wrap)
 
     let send_img = null
     // send the current image when the section is opened
@@ -170,7 +171,7 @@ function create_ui(prefJson)
         send_img()
     }
     const img_e = create_section(body, 'Image', active_section, send_img_update)
-    send_img = draw_image_create(img_e, PX_WIDTH, PX_HEIGHT, ws_wrap)
+    send_img = draw_image_create(img_e, px_width, px_height, ws_wrap)
 
     // not a panel section, opening it only refreshes the shown prefs instead of changing active_section
     let prefs_refresh = null

@@ -67,7 +67,24 @@ class JsonPrefHandler:
             handler.end_headers()
             handler.wfile.write(jstr)
             return True
+        # the draw tab's Update: there's no panel, an empty drawing in the size of the current orientation
+        path = handler.path.split("?")[0]
+        if path == "/drawing":
+            rot = g_pref.index["rotation"].d if "rotation" in g_pref.index else 0
+            w, h = (64, 128) if rot & 1 else (128, 64)
+            self.send_bytes(handler, bytes([w & 0xFF, w >> 8, h & 0xFF, h >> 8]) + bytes(w * h * 3), "application/octet-stream")
+            return True
+        if path == "/drawing_ver":
+            self.send_bytes(handler, b"0", "text/plain")
+            return True
         return False
+
+    def send_bytes(self, handler, data, content_type):
+        handler.send_response(HTTPStatus.OK)
+        handler.send_header("Content-type", content_type)
+        handler.send_header("Content-Length", len(data))
+        handler.end_headers()
+        handler.wfile.write(data)
                        
 g_pref_handler = JsonPrefHandler()
 
@@ -88,6 +105,8 @@ class WSPrefHandler(HTTPWebSocketsHandler):
         if sp[0] == 'U':
             key = sp[1]
             value = sp[2]
+            if key not in g_pref.index:
+                reload_prefs()  # maybe pref.dummy got new prefs since the server started
             if key not in g_pref.index:
                 self.log_message(f"WS unknown pref '{key}'")
                 return
@@ -120,12 +139,20 @@ def merge_prefs(default, cur):
             merged[k] = v
     return merged
 
-def main():
+# pref.dummy with the saved values over it, the saved ones are from memory once the server runs
+def reload_prefs():
     global g_pref
     prefs = json.load(open(PREF_DEFAULT))
-    if os.path.exists(PREF_CUR):
-        prefs = merge_prefs(prefs, json.load(open(PREF_CUR)))
-    g_pref = Pref(prefs)
+    if g_pref is not None:
+        cur = json.loads(g_pref.dumps())
+    elif os.path.exists(PREF_CUR):
+        cur = json.load(open(PREF_CUR))
+    else:
+        cur = {}
+    g_pref = Pref(merge_prefs(prefs, cur))
+
+def main():
+    reload_prefs()
     try:
         #Replace WSSimpleEcho with your own subclass of HTTPWebSocketHandler
         server = ThreadedHTTPServer(('', port), WSPrefHandler)

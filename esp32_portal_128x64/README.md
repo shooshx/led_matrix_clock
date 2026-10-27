@@ -16,3 +16,6 @@ Instructions:
 
 Buttons: UP click - next section, DOWN click - start/stop,
 UP long-press - change +1 (timer +1 min), DOWN long-press - change -1 (timer -1 min, stop watch reset)
+
+uploading
+If the esp starts and shows the drive, press boot button and reset

@@ -92,8 +92,9 @@ body {
 }
 
 .draw_canvas {
-    width: 100%;
-    max-width: 1200px;
+    /* keeps the aspect ratio, also for the tall portrait canvas */
+    max-width: min(100%, 1200px);
+    max-height: 85vh;
 }
 
 .draw_control {
@@ -264,4 +265,208 @@ body {
 /* hidden canvas that holds the pixels before scaling, shouldn't take space */
 .gfx_shadow_canvas {
     display: none;
+}
+
+/* landscape / portrait layout selector */
+.sect_shared {
+    margin: 10px 0 5px 0;
+}
+.orient_sel {
+    margin: 5px 0;
+}
+.orient_btn {
+    padding: 6px 10px;
+    border-radius: 6px;
+    background-color: #cccccc;
+    display: inline-block;
+    margin-right: 6px;
+    cursor: pointer;
+}
+.orient_btn[selected=true] {
+    background-color: #d3a8ff;
+    font-weight: bold;
+}
+.orient_note {
+    margin-left: 10px;
+    color: #666666;
+    font-size: 14px;
+}
+
+/* layout editor: the list of text blocks and the editor of the selected one */
+.lt_opts {
+    margin-bottom: 8px;
+}
+.lt_list {
+    max-width: 420px;
+    margin-bottom: 8px;
+}
+.lt_chip {
+    display: inline-block;
+    border: solid 1px #999999;
+    border-radius: 12px;
+    padding: 3px 9px 3px 4px;
+    margin: 0 4px 4px 0;
+    cursor: pointer;
+    background-color: #eeeeee;
+}
+.lt_chip[selected=true] {
+    background-color: #d3a8ff;
+    border-color: #7a3fc0;
+    font-weight: bold;
+}
+.lt_chip_show {
+    vertical-align: middle;
+    margin: 0 4px 0 0;
+}
+.lt_editor {
+    border: solid 1px;
+    border-radius: 8px;
+    padding: 8px;
+    width: max-content;
+}
+.lt_editor_title {
+    font-weight: bold;
+    margin-bottom: 6px;
+}
+
+/* Draw tab "Full screen": the draw area covers the window, the canvas size is set from js */
+.draw_top.draw_full {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    background-color: #000000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    box-sizing: border-box;
+}
+.draw_full .draw_control {
+    flex: none;
+    background-color: #ffffffdd;
+    border-radius: 8px;
+    margin: 4px;
+}
+.draw_full .draw_canvas {
+    max-width: none;
+    max-height: none;
+}
+
+/* Draw tab: Live checkbox and the status of Update */
+.draw_live {
+    display: inline-block;
+    margin: 0 10px 0 0;
+    vertical-align: top;
+    line-height: 30px;
+}
+.draw_status {
+    color: #aa0000;
+    font-size: 14px;
+    line-height: 30px;
+}
+
+/* Draw tab text tool */
+.draw_text_ctrl {
+    display: inline-block;
+    margin-right: 10px;
+    vertical-align: top;
+}
+/* the input that gets the typing of the text tool, not visible */
+.draw_text_input {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    border: 0;
+    padding: 0;
+    font-size: 16px; /* so iOS doesn't zoom when it's focused */
+    pointer-events: none;
+}
+
+/* clock special times */
+.sp_box {
+    border: solid 1px;
+    border-radius: 8px;
+    padding: 8px;
+    margin: 10px 0;
+    width: max-content;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+.sp_title {
+    font-weight: bold;
+    cursor: pointer;
+    user-select: none;
+}
+.sp_content {
+    margin-top: 6px;
+}
+.sp_tabs {
+    margin-bottom: 8px;
+}
+.sp_chip {
+    display: inline-block;
+    border: solid 1px #999999;
+    border-radius: 12px;
+    padding: 3px 10px;
+    margin: 0 4px 4px 0;
+    cursor: pointer;
+    background-color: #eeeeee;
+    color: #888888;
+    font-family: monospace;
+}
+.sp_chip[on=true] {
+    color: #000000;
+}
+.sp_chip[selected=true] {
+    background-color: #d3a8ff;
+    border-color: #7a3fc0;
+    font-weight: bold;
+}
+.sp_line {
+    margin-bottom: 8px;
+}
+.sp_label {
+    margin: 0 4px;
+}
+.sp_time {
+    height: 27px;
+    font-size: 16px;
+}
+.sp_speed {
+    width: 150px;
+    vertical-align: middle;
+}
+.sp_pulse {
+    display: inline-block;
+    margin-left: 10px;
+}
+.sp_colors {
+    margin: 4px 0 8px 0;
+}
+.sp_colors_hdr {
+    font-size: 14px;
+    color: #666666;
+    margin-bottom: 4px;
+}
+.sp_color_row {
+    margin-bottom: 3px;
+}
+.sp_color_label {
+    display: inline-block;
+    min-width: 70px;
+}
+.sp_color_row .clock_col_in {
+    width: 80px;
+    margin-right: 4px;
+}
+.sp_note {
+    font-size: 13px;
+    color: #666666;
 }
