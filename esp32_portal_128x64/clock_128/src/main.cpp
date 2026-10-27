@@ -240,6 +240,15 @@ void setupFs()
 
 void connectWifi()
 {
+  // log when the connection is lost and why, the core reconnects by itself
+  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+    Serial.printf("wifi: disconnected, reason %d\n", info.wifi_sta_disconnected.reason);
+  }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+    Serial.printf("wifi: got ip %s\n", WiFi.localIP().toString().c_str());
+  }, ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  WiFi.setAutoReconnect(true);
+
   Serial.print("Connecting to ");
   Serial.println(WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSW);
@@ -419,6 +428,13 @@ void setupWebSocket() {
 }
 
 
+// ArduinoJson allocations in PSRAM
+struct SpiRamAllocator : ArduinoJson::Allocator {
+    void* allocate(size_t size) override { return heap_caps_malloc(size, MALLOC_CAP_SPIRAM); }
+    void deallocate(void* p) override { heap_caps_free(p); }
+    void* reallocate(void* p, size_t size) override { return heap_caps_realloc(p, size, MALLOC_CAP_SPIRAM); }
+};
+
 void setupWeb()
 {
     setupWebSocket();
@@ -443,13 +459,17 @@ void setupWeb()
         request->send(200, "text/plain", String("ok ") + v);
     });
 
+    // the json of all the prefs is big, made in PSRAM so that the internal RAM is left to WiFi
     server.on("/pref", HTTP_GET, [](AsyncWebServerRequest *request){
         Serial.println("got /pref req");
-        AsyncJsonResponse * response = new AsyncJsonResponse();
+        static SpiRamAllocator allocator;
+        JsonDocument doc(&allocator);
+        state->toJson(doc.to<JsonObject>());
+        String* out = new String();  // long, so its buffer is in PSRAM
+        serializeJson(doc, *out);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", *out);
+        delete out;
         response->addHeader("Server","ESP Clock");
-        JsonObject root = response->getRoot().to<JsonObject>();
-        state->toJson(root);
-        response->setLength();
         request->send(response);
     });
 
@@ -513,8 +533,15 @@ void setupDisplay()
 
 void setupState()
 {
+    // the hundreds of props are small allocations (their names, the names index) that would all go to the
+    // internal RAM, which WiFi and the web server need. while they are made, small allocations go to PSRAM too.
+    // only while constructing: loading uses NVS (flash), keep that the default
+    Serial.printf("heap before state: %u\n", ESP.getFreeHeap());
+    heap_caps_malloc_extmem_enable(16);
     state = new State();
+    heap_caps_malloc_extmem_enable(4096);  // the default threshold
     state->load();
+    Serial.printf("heap after state: %u, psram free %u\n", ESP.getFreeHeap(), ESP.getFreePsram());
 }
 
 // MatrixPortal S3 on-board buttons:
@@ -825,4 +852,14 @@ void loop(void)
 
   buttons.scan();
   ws.cleanupClients();
+
+  // a status line every 30 seconds, for when the device stops answering on the network
+  static unsigned long last_status = 0;
+  if (millis() - last_status >= 30000) {
+    last_status = millis();
+    Serial.printf("status: wifi %s rssi %d, heap free %u min %u largest block %u, psram free %u\n",
+                  WiFi.status() == WL_CONNECTED ? "connected" : "NOT connected", WiFi.RSSI(),
+                  ESP.getFreeHeap(), ESP.getMinFreeHeap(),
+                  heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL), ESP.getFreePsram());
+  }
 }
