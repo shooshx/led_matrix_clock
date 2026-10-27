@@ -34,6 +34,7 @@
 #include "GamesState.h"
 #include "DinoGame.h"
 #include "TetrisGame.h"
+#include "LifeGame.h"
 #include "Orientation.h"
 
 
@@ -52,18 +53,34 @@ uint8_t clockPin   = 2;
 uint8_t latchPin   = 47;
 uint8_t oePin      = 14;
 
-#define MATRIX_BIT_DEPTH 4 // bits per color, more is nicer but slower refresh
 #define NUM_ADDR_PINS 5    // for 64 rows
+const int MIN_COLOR_BITS = 2;
+const int SAFE_COLOR_BITS = 4; // the last fallback, known to work
+const int MAX_COLOR_BITS = 6; // Protomatter's limit
 
-Adafruit_Protomatter matrix(
-  DISPLAY_WIDTH, MATRIX_BIT_DEPTH, 1, rgbPins, NUM_ADDR_PINS, addrPins,
-  clockPin, latchPin, oePin, true);
+// the matrix is made again when its bit depth (bits per color) changes, from the "color_bits" pref.
+// more bits are smoother colors but a slower refresh, more flicker, and a bigger buffer in internal RAM
+Adafruit_Protomatter* matrix = nullptr;
+int g_color_bits = 0;  // of the current matrix
 
 WrapGFX display(DISPLAY_WIDTH, DISPLAY_HEIGHT);
-MatrixDrawer matrix_drawer(&matrix);
+MatrixDrawer matrix_drawer(nullptr);
 HaloDraw halo_drawer(&matrix_drawer, DISPLAY_WIDTH, DISPLAY_HEIGHT);
 
 bool has_display = false;
+bool g_admin = false;  // the hidden admin view, see AdminScreen
+bool g_force_redraw = false; // draw the current mode on the next loop
+volatile bool g_off_redraw = false; // blank the panel again in the off mode
+
+// the off mode: nothing shown
+class OffScreen : public IScreen
+{
+public:
+    void draw() override {
+        display.setDrawer(&matrix_drawer);
+        display.clearDisplay();
+    }
+} off_screen;
 bool has_serial = false;
 
 unsigned long g_epoch_time = 0;
@@ -88,17 +105,21 @@ const int HID_MODES[] = { SECTION_CLOCK, SECTION_STOPW, SECTION_TIMER, SECTION_D
 #define SECTION_BTN_FIRST SECTION_CLOCK
 #define SECTION_BTN_LAST SECTION_STOPW
 
-class TopState : public PropHolder<2>
+class TopState : public PropHolder<4>
 {
 public:
     Prop<int16_t> active_section;
     Prop<uint16_t> brightness;
+    Prop<int16_t> gamma;  // in tenths, 10 is 1.0, no correction
+    Prop<int16_t> color_bits; // bits per color of the matrix, 2-6
     Preferences m_pref;
 
     TopState(NamesIndex* prop_map)
       : PropHolder(prop_map)
       , active_section(this, "active_section", 0)
       , brightness(this, "brightness", 255)
+      , gamma(this, "gamma", 10)
+      , color_bits(this, "color_bits", 4)
     {}
 
     void load() {
@@ -135,8 +156,10 @@ public:
     TimerState timer;
     StopWState stopw;
     DrawTextState drawtext;
+    ImageState image;
     DinoGame dino;
     TetrisGame tetris;
+    LifeGame life;
     GamesState games;
     IScreen* m_cur_screen = nullptr;
 
@@ -145,7 +168,7 @@ public:
         , top(&m_prop_map)
         , timer(&m_prop_map)
         , stopw(&m_prop_map)
-        , games({&dino, &tetris})
+        , games({&dino, &tetris, &life})
     {
     }
 
@@ -166,6 +189,7 @@ public:
         top.toJson(root);
         // not a pref, so that the web-ui knows the current orientation
         root["rotation"] = display.getRotation();
+        root["color_bits_actual"] = g_color_bits; // what color_bits could be applied
         clock_state.toJson(root["clock"].to<JsonObject>());
         timer.toJson(root["timer"].to<JsonObject>());
         stopw.toJson(root["stopw"].to<JsonObject>());
@@ -238,36 +262,55 @@ void setupFs()
 }
 
 
+const char* MDNS_NAME = "myesp32clock";
+volatile int g_wifi_reason = 0;  // of the last disconnect, 0 if none yet
+volatile bool g_wifi_got_ip = false;
+
+// starts connecting, doesn't wait for it so that the clock (and the admin view) work without WiFi.
+// the core keeps reconnecting by itself. mDNS is started in the loop once there's an IP (startMdns)
 void connectWifi()
 {
-  // log when the connection is lost and why, the core reconnects by itself
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+    g_wifi_reason = info.wifi_sta_disconnected.reason;
     Serial.printf("wifi: disconnected, reason %d\n", info.wifi_sta_disconnected.reason);
   }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+    g_wifi_got_ip = true;
     Serial.printf("wifi: got ip %s\n", WiFi.localIP().toString().c_str());
   }, ARDUINO_EVENT_WIFI_STA_GOT_IP);
   WiFi.setAutoReconnect(true);
 
-  Serial.print("Connecting to ");
-  Serial.println(WIFI_SSID);
+  Serial.printf("Connecting to %s\n", WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSW);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(250);
-    Serial.print(".");
-  }
-  Serial.println("");
-  Serial.println("connected.");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+}
 
-  if(!MDNS.begin("myesp32clock"))
+// once, the first time there's an IP
+void startMdns()
+{
+  static bool started = false;
+  if (started || !g_wifi_got_ip)
+    return;
+  started = true;
+  if (!MDNS.begin(MDNS_NAME))
     Serial.println("Error starting mDNS");
   else
     Serial.println("mDNS responder started");
-
   if (!MDNS.addService("http", "tcp", 80))
     Serial.println("MDNS addService failed");
+}
+
+// for the admin view
+String wifiStatusText()
+{
+  if (WiFi.status() == WL_CONNECTED)
+    return "IP " + WiFi.localIP().toString();
+  switch (g_wifi_reason) {
+    case 0:   return "WiFi connecting";
+    case 201: return "WiFi: no network";      // WIFI_REASON_NO_AP_FOUND
+    case 15: case 202: case 204:
+              return "WiFi: bad password";    // 4WAY_HANDSHAKE_TIMEOUT, AUTH_FAIL, HANDSHAKE_TIMEOUT
+    default:  return String("WiFi failed (") + g_wifi_reason + ")";
+  }
 }
 
 void setupNtp()
@@ -319,12 +362,10 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
             parse_pixel_cmd(v, [](int x, int y, uint16_t c) { state->drawtext.set_pixel(x, y, c); });
         else if (subcmd == 'X')  // clear of the draw tab, the drawing and the text
             state->drawtext.clear_all();
-        else if (subcmd == 'C') {
-            display.clearDisplay();
-            display.finish();
-        }
+        else if (subcmd == 'C')  // the off tab, the loop blanks the panel
+            g_off_redraw = true;
         else if (subcmd == 'I')
-            parse_img_cmd(v);
+            parse_img_cmd(v, [](int x, int y, uint16_t c) { state->image.set_pixel(x, y, c); });
         else
             Serial.printf("Unknown D subcmd %c\n", subcmd);
     }
@@ -512,12 +553,71 @@ void setupWeb()
 }
 
 
+// a new matrix with this many bits per color, replacing the current one. its buffer needs one contiguous block
+// of internal DMA memory, if there isn't one big enough it goes back to the previous depth. returns true if done
+bool setColorBits(int bits)
+{
+  bits = constrain(bits, MIN_COLOR_BITS, MAX_COLOR_BITS);
+  if (matrix != nullptr && bits == g_color_bits)
+    return true;
+  int prev = g_color_bits;
+  bool live = matrix != nullptr; // replacing a running one, not at boot
+  if (live) { // stop and free first, so that its memory can be used by the new one
+    matrix_drawer.setMatrix(nullptr);
+    delete matrix;
+    matrix = nullptr;
+    // Protomatter leaves its timer (#0) set up with the interrupt attached.
+    // released so that the new matrix sets it up from scratch, like at boot
+    hw_timer_t* t = timerBegin(0, 2, true);
+    timerDetachInterrupt(t);
+    timerEnd(t);
+  }
+  for (int tryb : {bits, prev, SAFE_COLOR_BITS}) {
+    if (tryb < MIN_COLOR_BITS)
+      continue;
+    Adafruit_Protomatter* m = new Adafruit_Protomatter(DISPLAY_WIDTH, tryb, 1, rgbPins, NUM_ADDR_PINS, addrPins,
+                                                       clockPin, latchPin, oePin, true);
+    ProtomatterStatus status = m->begin();
+    Serial.printf("matrix: %d bits per color, begin() status %d, largest internal block %u\n", tryb, status,
+                  heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    if (status == PROTOMATTER_OK) {
+      matrix = m;
+      g_color_bits = tryb;
+      matrix_drawer.setMatrix(m);
+      if (live) {
+        // is it really refreshing? if not, restart: at boot it's set up with the saved color_bits and that works
+        // getFrameCount() is the frames since the previous call
+        m->getFrameCount();
+        uint32_t frames = 0;
+        unsigned long start = millis();
+        while (frames == 0 && millis() - start < 500) {
+          delay(5);
+          frames += m->getFrameCount();
+        }
+        if (frames == 0) {
+          Serial.printf("matrix: %d bits doesn't refresh after the change, restarting to apply it\n", tryb);
+          state->save();
+          delay(100);
+          ESP.restart();
+        }
+        Serial.printf("matrix: refreshing, first frame after %lu ms\n", millis() - start);
+      }
+      return tryb == bits;
+    }
+    delete m;
+  }
+  matrix_drawer.setMatrix(nullptr);
+  g_color_bits = 0;
+  return false;
+}
+
 void setupDisplay()
 {
-  ProtomatterStatus status = matrix.begin();
-  Serial.printf("Protomatter begin() status: %d\n", status);
-  if (status != PROTOMATTER_OK)
+  setColorBits(state->top.color_bits.get());
+  if (matrix == nullptr) {
+    Serial.println("no display");
     return;
+  }
 
   display.setDrawer(&matrix_drawer);
   display.clearDisplay();
@@ -586,16 +686,26 @@ void setupButtons()
 
 void setup(void)
 {
+  // holding the board's Up or Down button while it starts opens the admin view
+  pinMode(BTN_UP, INPUT_PULLUP);
+  pinMode(BTN_DOWN, INPUT_PULLUP);
+  delay(5);
+  g_admin = digitalRead(BTN_UP) == LOW || digitalRead(BTN_DOWN) == LOW;
+
   setupSerial();
+  if (g_admin)
+    Serial.println("admin view");
   setupFs(); // before the state, the draw mode loads its drawing from it
   setupState();
   setupPins();
+
+  // the display before WiFi and BLE take memory, its buffer needs a big contiguous block of internal RAM
+  setupDisplay();
 
   connectWifi();
   setupNtp();
   setupWeb();
 
-  setupDisplay();
   setupButtons();
   orientation.begin();
   ble_hid_begin();
@@ -613,6 +723,145 @@ bool updateTime()
   return (g_epoch_time != prevEpochTime);
 }
 
+
+// The hidden admin view: when the board's Up or Down button is held while it starts.
+// a list of lines, the remote's Up/Down select one, Left/Right change the editable ones, Back goes to the clock.
+// a reset without holding a button goes back to the clock
+
+class AdminScreen : public IScreen
+{
+public:
+    void on_hid(const HidEvent& ev) {
+        if (ev.type != HidEvent::KEY_DOWN)
+            return; // a release is shown at the top by update()
+        switch (ev.key) {
+            case HID_KEY_UP:    m_sel = (m_sel + LINES - 1) % LINES; break;
+            case HID_KEY_DOWN:  m_sel = (m_sel + 1) % LINES; break;
+            case HID_KEY_LEFT:  change(-1); break;
+            case HID_KEY_RIGHT: change(1); break;
+            default: return;
+        }
+        m_need_draw = true;
+    }
+
+    // the WiFi and the remote change by themselves, redrawn twice a second, and when a key comes
+    bool update() {
+        uint32_t keys;
+        ble_hid_last_key(&keys);
+        if (millis() - m_last_draw >= 500 || keys != m_drawn_keys)
+            m_need_draw = true;
+        bool r = m_need_draw;
+        m_need_draw = false;
+        return r;
+    }
+
+    // all in the small 4x6 font
+    void draw() override {
+        m_last_draw = millis();
+        ble_hid_last_key(&m_drawn_keys);
+        display.setDrawer(&matrix_drawer);
+        display.clearDisplay();
+        int w = display.width();
+        int cols = w / CHAR_W;
+        // the title and the last key from the remote, like the serial log. the key goes under it if it doesn't fit
+        // a full circle for a press, an empty one for a release, then the code
+        bool pressed = false;
+        String key = ble_hid_last_key(nullptr, &pressed);
+        small_text(0, 0, "ADMIN", rgb565(255, 210, 0));
+        int y = 0;
+        if (key.length() > 0) {
+            const int mark = 2;  // the circle takes the room of 2 chars
+            int col = 6;         // after "ADMIN "
+            if (col + mark + (int)key.length() > cols) { // under the title if it doesn't fit
+                y += LINE_H;
+                col = 0;
+            }
+            uint16_t c = rgb565(120, 200, 255);
+            int cx = col * CHAR_W + 2;
+            if (pressed)
+                display.fillCircle(cx, y + 2, 2, c);
+            else
+                display.drawCircle(cx, y + 2, 2, c);
+            // the rest of this line after the circle, then whole lines (portrait)
+            int pos = 0, room = cols - col - mark;
+            small_text((col + mark) * CHAR_W, y, key.substring(0, room), c);
+            for (pos = room; pos < (int)key.length(); pos += cols) {
+                y += LINE_H;
+                small_text(0, y, key.substring(pos, pos + cols), c);
+            }
+        }
+        y += LINE_H + 2;
+        for (int i = 0; i < LINES; ++i) {
+            String t = text(i);
+            int rows = max(1, ((int)t.length() + cols - 1) / cols); // long lines wrap (portrait)
+            if (i == m_sel)
+                display.fillRect(0, y - 1, w, rows * LINE_H + 1, rgb565(30, 40, 120));
+            for (int r = 0; r < rows; ++r) {
+                small_text(0, y, t.substring(r * cols, min((int)t.length(), (r + 1) * cols)),
+                           editable(i) ? rgb565(255, 255, 255) : rgb565(170, 170, 190));
+                y += LINE_H;
+            }
+        }
+    }
+
+private:
+    enum { L_IP, L_DNS, L_TZ, L_BRIGHTNESS, L_REMOTE, LINES };
+    int m_sel = 0;
+    bool m_need_draw = true;
+    unsigned long m_last_draw = 0;
+
+    static bool editable(int i) { return i == L_TZ || i == L_BRIGHTNESS; }
+
+    static const int CHAR_W = 4; // the 4x6 font
+    static const int LINE_H = 7;
+    uint32_t m_drawn_keys = 0;
+
+    static void small_text(int x, int y, const String& t, uint16_t color) {
+        display.setFont(&MiscFixedMediumRNormal6607575C40iso88598); // 4x6, drawn from the top
+        display.setTextSize(1);
+        display.setTextColor(color);
+        display.setCursor(x, y);
+        display.print(t);
+        display.setFont(nullptr);
+    }
+
+    void change(int d) {
+        if (m_sel == L_TZ) {
+            auto& tz = state->clock_state.m_panel.m_tz_offset;
+            tz.set(constrain(tz.get() + d, -12, 14));
+        }
+        else if (m_sel == L_BRIGHTNESS) {
+            auto& b = state->top.brightness;
+            b.set(constrain((int)b.get() + d * 16, 0, 255));
+        }
+        else
+            return;
+        state->save();
+    }
+
+    // the selected editable one shows < > around its value
+    String value(int i, const String& v) {
+        return (i == m_sel) ? "<" + v + ">" : v;
+    }
+
+    String text(int i) {
+        switch (i) {
+            case L_IP:  return wifiStatusText();
+            case L_DNS: return String(MDNS_NAME) + ".local";
+            case L_TZ: {
+                int tz = state->clock_state.m_panel.m_tz_offset.get();
+                return "Time zone " + value(i, String(tz >= 0 ? "+" : "") + tz);
+            }
+            case L_BRIGHTNESS:
+                return "Brightness " + value(i, String(state->top.brightness.get()));
+            case L_REMOTE: {
+                const char* d = ble_hid_device();
+                return String("Remote ") + (*d ? d : "searching");
+            }
+        }
+        return "";
+    }
+} admin_screen;
 
 void set_section(int section)
 {
@@ -701,6 +950,16 @@ void handleHidEvent(const HidEvent& ev)
     }
     return;  // nothing else while it's off
   }
+  if (g_admin) {
+    if (press && ev.key == HID_KEY_BACK) { // out of the admin view, to the clock
+      g_admin = false;
+      set_section(SECTION_CLOCK);
+      g_force_redraw = true;
+      return;
+    }
+    admin_screen.on_hid(ev);
+    return;
+  }
   int section = state->top.active_section.get();
   // while typing, all the keys go to the editor and the movement is ignored, Esc stops typing
   // in a game all the input goes to it, in the games menu Up/Down still change the mode
@@ -773,6 +1032,7 @@ void drawModeIcon(int section)
 int g_loop_count = 0;
 int g_prev_section = -1;
 int g_prev_brightness = -1;
+int g_prev_gamma = -1;
 int g_prev_rotation = -1;
 bool g_prev_display_off = false;
 
@@ -790,7 +1050,11 @@ void loop(void)
     display.setRotation(orientation.rotation());
   int rotation = display.getRotation();
   // brightness is applied when drawing, so a change needs a redraw, same for a new orientation
-  bool section_changed = (section != g_prev_section) || (brightness != g_prev_brightness) || (rotation != g_prev_rotation);
+  int gamma = state->top.gamma.get();
+  bool section_changed = (section != g_prev_section) || (brightness != g_prev_brightness) || (rotation != g_prev_rotation)
+                         || (gamma != g_prev_gamma) || g_force_redraw;
+  g_force_redraw = false;
+  g_prev_gamma = gamma;
   if (g_display_off != g_prev_display_off) {
     g_prev_display_off = g_display_off;
     if (g_display_off && has_display) { // blank once
@@ -804,13 +1068,26 @@ void loop(void)
   g_prev_brightness = brightness;
   g_prev_rotation = rotation;
 
+  // a new bit depth from the web-ui. tried once per new value, if it can't be done color_bits_actual says so
+  static int tried_bits = -1;
+  int bits = state->top.color_bits.get();
+  if (has_display && bits != tried_bits) {
+    tried_bits = bits;
+    if (bits != g_color_bits) {
+      setColorBits(bits);
+      section_changed = true; // the new matrix is empty
+    }
+  }
+
   display.setDrawer(&matrix_drawer);
   matrix_drawer.setBrightness(brightness);
+  matrix_drawer.setGamma(gamma);
 
   bool time_changed = updateTime();
   bool timer_need_draw = state->timer.m_panel.update_time();
   bool stopw_need_draw = state->stopw.m_panel.update_time();
   bool drawtext_need_draw = state->drawtext.update();
+  bool image_need_draw = state->image.update();
   bool clock_need_draw = (section == SECTION_CLOCK) && state->clock_state.update(); // special times
   bool games_need_draw = (section == SECTION_GAMES) && !g_display_off && state->games.update(); // no playing in the dark
 
@@ -836,20 +1113,37 @@ void loop(void)
     screen = &state->drawtext;
   }
 
+  // redrawn when the brightness changes too, like the other modes
+  if ((image_need_draw || section_changed) && section == SECTION_IMAGE)
+  {
+    screen = &state->image;
+  }
+
   if ((games_need_draw || section_changed) && section == SECTION_GAMES)
   {
     screen = &state->games;
   }
 
+  if ((section_changed || g_off_redraw) && section == SECTION_OFF)
+  {
+    g_off_redraw = false;
+    screen = &off_screen;
+  }
+
+  if (g_admin) // instead of the mode
+    screen = (admin_screen.update() || section_changed) ? &admin_screen : nullptr;
+
   if (screen != nullptr && has_display && !g_display_off) {
     state->m_cur_screen = screen;
     screen->draw();
-    drawModeIcon(section);
+    if (!g_admin)
+      drawModeIcon(section);
     // finish() flushes the halo drawer, it has the kept outlined text and then flushes the matrix
     display.setDrawer(&halo_drawer);
     display.finish();
   }
 
+  startMdns(); // once WiFi has an IP
   buttons.scan();
   ws.cleanupClients();
 

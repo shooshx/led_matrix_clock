@@ -246,6 +246,7 @@ static uint16_t toKey(uint32_t full)
         case 0x46: return HID_KEY_ESC;     // MenuEscape
         case 0x224: return HID_KEY_BACK;
         case 0x30: return HID_KEY_POWER;
+        case 0x223: return HID_KEY_REMOTE_HOME;
         case 0xE9: return HID_KEY_VOL_UP;
         case 0xEA: return HID_KEY_VOL_DOWN;
         }
@@ -270,6 +271,10 @@ static char toChar(uint32_t full, bool shift, bool caps)
 // ---- report decoding ----
 
 static QueueHandle_t g_queue = nullptr;
+// the last press / release, like in the serial log, for the admin view
+static char g_last_key[48] = "";
+static volatile uint32_t g_last_key_count = 0;
+static volatile bool g_last_key_pressed = false;
 static volatile bool g_caps_lock = false;
 static volatile bool g_disconnected = false;
 
@@ -344,6 +349,9 @@ static void decodeReport(uint8_t id, const uint8_t *d, size_t len)
         ev.key = toKey(u);
         ev.ch = toChar(u, shift, g_caps_lock);
         pushEvent(ev); // before printing so that a slow serial doesn't delay it
+        snprintf(g_last_key, sizeof(g_last_key), "%04x:%04x %s", (unsigned)(u >> 16), (unsigned)(u & 0xFFFF), usageName(u).c_str());
+        g_last_key_pressed = true;
+        ++g_last_key_count;
         String t = LOG_TIMING ? "  t=" + String(millis()) : String();
         if (ev.ch != 0)
             Serial.printf("HID press %04x:%04x %s  typed '%c'%s\n", u >> 16, u & 0xFFFF, usageName(u).c_str(), ev.ch, t.c_str());
@@ -357,6 +365,9 @@ static void decodeReport(uint8_t id, const uint8_t *d, size_t len)
         ev.usage = u;
         ev.key = toKey(u);
         pushEvent(ev);
+        snprintf(g_last_key, sizeof(g_last_key), "%04x:%04x %s", (unsigned)(u >> 16), (unsigned)(u & 0xFFFF), usageName(u).c_str());
+        g_last_key_pressed = false;
+        ++g_last_key_count;
         if (LOG_TIMING)
             Serial.printf("HID release %04x:%04x %s  t=%lu\n", u >> 16, u & 0xFFFF, usageName(u).c_str(), millis());
     }
@@ -388,6 +399,7 @@ static const NimBLEUUID BOOT_MOUSE_IN((uint16_t)0x2A33);
 static NimBLEAdvertisedDevice *g_target = nullptr;
 static volatile bool g_doConnect = false;
 static NimBLEClient *g_client = nullptr;
+static char g_device_name[32] = "";  // of the connected device, empty when none
 static std::map<uint16_t, uint8_t> g_handleToReportId;
 
 static bool isHidAppearance(uint16_t a)
@@ -424,6 +436,7 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     void onDisconnect(NimBLEClient *c) override {
         Serial.println("BLE HID: disconnected");
         g_disconnected = true;
+        g_device_name[0] = 0;
     }
     uint32_t onPassKeyRequest() override {
         Serial.printf("BLE HID: passkey requested, answering %06u\n", PASSKEY);
@@ -522,6 +535,8 @@ static bool connectToHid(NimBLEAdvertisedDevice *dev)
         return false;
     }
     Serial.printf("BLE HID: ready, subscribed to %d reports\n", subscribed);
+    std::string name = dev->getName();
+    snprintf(g_device_name, sizeof(g_device_name), "%s", name.empty() ? dev->getAddress().toString().c_str() : name.c_str());
     return true;
 }
 
@@ -579,6 +594,20 @@ void ble_hid_begin()
 static bool isModifier(uint16_t key)
 {
     return key >= 0xE0 && key <= 0xE7;
+}
+
+const char* ble_hid_last_key(uint32_t* count, bool* pressed)
+{
+    if (count)
+        *count = g_last_key_count;
+    if (pressed)
+        *pressed = g_last_key_pressed;
+    return g_last_key;
+}
+
+const char* ble_hid_device()
+{
+    return g_device_name;
 }
 
 bool ble_hid_caps_lock()

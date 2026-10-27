@@ -111,6 +111,8 @@ class WSPrefHandler(HTTPWebSocketsHandler):
                 self.log_message(f"WS unknown pref '{key}'")
                 return
             g_pref.index[key].d = int(value)
+            if key == 'color_bits' and 'color_bits_actual' in g_pref.index:
+                g_pref.index['color_bits_actual'].d = int(value)  # no panel here, it always works
             open(PREF_CUR, "wb").write(g_pref.dumps())
         elif sp[0] == 'D':
             pass

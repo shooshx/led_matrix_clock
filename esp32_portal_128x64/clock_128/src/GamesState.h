@@ -83,8 +83,14 @@ public:
     virtual const char* name() const = 0;
     virtual const Sprite& icon() const = 0;
     virtual bool portrait() const = 0;        // the orientation it's played in
+    virtual bool any_orientation() const { return false; } // or it doesn't matter
     virtual void load(Preferences& pref) = 0; // the high score
     virtual uint32_t high_score() const = 0;
+    virtual bool has_high_score() const { return true; }
+    // extra lines in the pause menu (pause_option(i) is null after the last), and their keys:
+    // on_pause_key() returns true if it was one of them, then the game continues
+    virtual const char* pause_option(int i) const { return nullptr; }
+    virtual bool on_pause_key(uint16_t key) { return false; }
     virtual void start() = 0;                 // to its start screen
     virtual void tick() = 0;                  // a frame, FPS per second
     virtual void on_hid(const HidEvent& ev) = 0;
@@ -97,7 +103,8 @@ public:
 class GamesState : public IScreen
 {
 public:
-    static const unsigned long FRAME_MS = 33; // ~30 frames per second
+    static const int FPS = 30;
+    static const unsigned long FRAME_MS = 1000 / FPS;
 
     GamesState(std::initializer_list<Game*> games) : m_games(games) {}
 
@@ -137,6 +144,8 @@ public:
         }
         if (m_paused) {
             if (press && ev.key == HID_KEY_ENTER)
+                m_paused = false;
+            else if (press && game()->on_pause_key(ev.key))
                 m_paused = false;
             else if (press && ev.key == HID_KEY_BACK)
                 m_playing = false;
@@ -201,7 +210,7 @@ private:
     Preferences m_pref;
 
     Game* game() { return m_games[m_sel]; }
-    bool orientation_ok() { return display.is_portrait() == game()->portrait(); }
+    bool orientation_ok() { return game()->any_orientation() || display.is_portrait() == game()->portrait(); }
     bool blink() const { return (m_anim & 2) == 0; }
 
     void draw_menu() {
@@ -216,9 +225,11 @@ private:
             draw_text(1, h / 2 - 7, "<", ac);
             draw_text(w - 6, h / 2 - 7, ">", ac);
         }
-        char buf[16];
-        snprintf(buf, sizeof(buf), "HI %u", (unsigned)game()->high_score());
-        draw_text_center(h - 18, buf, rgb565(120, 120, 140));
+        if (game()->has_high_score()) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "HI %u", (unsigned)game()->high_score());
+            draw_text_center(h - 18, buf, rgb565(120, 120, 140));
+        }
         if (blink())
             draw_text_center(h - 9, "OK to play", rgb565(60, 220, 60));
     }
@@ -238,14 +249,41 @@ private:
         }
     }
 
+    // the lines in a frame as wide as the longest one, as wide as the display at most.
+    // a line that doesn't fit is split after its ':' into two lines
     void draw_paused() {
         int w = display.width(), h = display.height();
-        int bw = min(w - 2, 62), bh = 32;
+        struct Line { char text[24]; uint16_t color; };
+        Line lines[10];
+        int n = 0;
+        auto add = [&](const char* s, uint16_t color) {
+            const char* colon = strchr(s, ':');
+            if (text_width(s) > w - 6 && colon != nullptr && n < 9) {
+                snprintf(lines[n].text, sizeof(lines[n].text), "%.*s", (int)(colon - s + 1), s);
+                lines[n++].color = color;
+                s = colon + 1;
+                while (*s == ' ')
+                    ++s;
+            }
+            if (n < 10) {
+                snprintf(lines[n].text, sizeof(lines[n].text), "%s", s);
+                lines[n++].color = color;
+            }
+        };
+        add("PAUSED", rgb565(255, 210, 0));
+        add("OK: play", rgb565(60, 220, 60));
+        add("Back: menu", rgb565(230, 80, 80));
+        for (int i = 0; game()->pause_option(i) != nullptr; ++i)
+            add(game()->pause_option(i), rgb565(120, 200, 255));
+
+        int tw = 0;
+        for (int i = 0; i < n; ++i)
+            tw = max(tw, text_width(lines[i].text));
+        int bw = min(w, tw + 6), bh = n * 9 + 5;
         int x = (w - bw) / 2, y = (h - bh) / 2;
         display.fillRect(x, y, bw, bh, 0);
         display.drawRect(x, y, bw, bh, rgb565(120, 200, 255));
-        draw_text_center(y + 3, "PAUSED", rgb565(255, 210, 0));
-        draw_text_center(y + 13, "OK: play", rgb565(60, 220, 60));
-        draw_text_center(y + 22, "Back:menu", rgb565(230, 80, 80));
+        for (int i = 0; i < n; ++i)
+            draw_text_center(y + 3 + i * 9, lines[i].text, lines[i].color);
     }
 };

@@ -133,6 +133,44 @@ function add_glob_prop_ui(parent, prefJson, send_update)
     add_slider(cont, 'bright_in', 0, 255, prefJson['brightness'] || 0, (v)=>{
         send_update('brightness', v)
     })
+    // in tenths: 10 is 1.0 (none), higher makes the bright colors more distinct and the dark ones darker
+    const gcont = add_div(parent, 'glob_prop')
+    add_elem(gcont, 'span', 'bright_label').innerText = 'Gamma:'
+    const gamma = prefJson['gamma'] || 10
+    add_slider(gcont, 'bright_in', 10, 30, gamma, (v)=>{
+        gval.innerText = (v / 10).toFixed(1)
+        send_update('gamma', v)
+    })
+    const gval = add_elem(gcont, 'span', 'gamma_val')
+    gval.innerText = (gamma / 10).toFixed(1)
+
+    // bits per color of the panel: more is smoother colors and more flicker. the panel says what it could do
+    const ccont = add_div(parent, 'glob_prop')
+    const opts = [2, 3, 4, 5, 6].map((b)=>({value:b, text:b + " bits (" + (1 << b) + " levels)"}))
+    const status = add_elem(ccont, 'span', 'color_bits_status')
+    const sel = add_select(ccont, "Color depth: ", opts, prefJson['color_bits_actual'] || prefJson['color_bits'] || 4, (v)=>{
+        status.innerText = " applying..."
+        send_update('color_bits', v)
+        // ask the panel what it could do. it may not answer while it's switching, then try again
+        const check = (tries)=>{
+            download("/pref?t=" + new Date().getTime(), (t)=>{
+                const actual = JSON.parse(t)['color_bits_actual']
+                if (actual === undefined || actual == v)
+                    status.innerText = ""
+                else {
+                    status.innerText = " not enough memory, still " + actual + " bits"
+                    sel.value = actual
+                }
+            }, ()=>{
+                if (tries > 1)
+                    window.setTimeout(()=>{ check(tries - 1) }, 2000)
+                else
+                    status.innerText = " the panel doesn't answer"
+            })
+        }
+        window.setTimeout(()=>{ check(4) }, 1500)
+    })
+    ccont.appendChild(status) // after the select
 }
 
 function create_ui(prefJson)

@@ -12,6 +12,7 @@ enum HidKey : uint16_t {
     HID_KEY_BACKSPACE = 0x2A,
     HID_KEY_TAB = 0x2B,
     HID_KEY_CAPS_LOCK = 0x39,
+    HID_KEY_MENU = 0x65,  // the application / context menu key
     HID_KEY_HOME = 0x4A,
     HID_KEY_PGUP = 0x4B,
     HID_KEY_DELETE = 0x4C,
@@ -25,6 +26,7 @@ enum HidKey : uint16_t {
     HID_KEY_VOL_DOWN = 0x81,
     HID_KEY_BACK = 0x1000, // no keyboard equivalent, the consumer page Back key (remotes)
     HID_KEY_POWER = 0x1001, // SysPowerDown, or a Power key
+    HID_KEY_REMOTE_HOME = 0x1002, // the consumer page Home key of remotes, not the keyboard's Home
 };
 
 struct HidEvent {
@@ -42,6 +44,13 @@ void ble_hid_begin();
 
 // gets the next input event, call from loop(). returns false if there's none
 bool ble_hid_poll(HidEvent& ev);
+
+// the last key pressed or released as text, like the serial log ("000c:0224 Back").
+// count changes with every new one, pressed says if it was pressed or released
+const char* ble_hid_last_key(uint32_t* count = nullptr, bool* pressed = nullptr);
+
+// the name of the connected device, empty when none is connected
+const char* ble_hid_device();
 
 // caps lock state, the typed chars (HidEvent::ch) already take it into account
 bool ble_hid_caps_lock();

@@ -277,7 +277,9 @@ static void _PM_timerInit(Protomatter_core* core) {
   desc.next = NULL;
 
   // Alloc DMA channel & connect it to LCD periph
-#if defined(CIRCUITPY)
+  // clock_128 patch: also outside CircuitPython the channel is allocated only once, so that the matrix
+  // can be stopped and begun again (changing the bit depth at run time) without leaking DMA channels
+#if 1 // was: defined(CIRCUITPY)
   if (dma_chan == NULL) {
 #endif
     gdma_channel_alloc_config_t dma_chan_config = {
@@ -294,9 +296,11 @@ static void _PM_timerInit(Protomatter_core* core) {
         .psram_trans_align = 0,
     };
     gdma_set_transfer_ability(dma_chan, &ability);
-#if defined(CIRCUITPY)
+#if 1 // was: defined(CIRCUITPY)
   }
 #endif
+  // clock_128 patch: the channel may be reused from a matrix that was stopped in the middle of a transfer
+  gdma_reset(dma_chan);
   gdma_start(dma_chan, (intptr_t)&desc);
 
   // Enable TRANS_DONE interrupt. Note that we do NOT require nor install

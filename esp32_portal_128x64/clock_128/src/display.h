@@ -93,34 +93,60 @@ class MatrixDrawer : public IDraw
 {
 public:
     MatrixDrawer(Adafruit_Protomatter* matrix) : m_matrix(matrix)
-    {}
+    {
+        make_lut(255, 10);
+    }
 
     void setPixel(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b) override {
-        if (m_brightness != 255) {
-            r = (uint16_t(r) * (m_brightness + 1)) >> 8;
-            g = (uint16_t(g) * (m_brightness + 1)) >> 8;
-            b = (uint16_t(b) * (m_brightness + 1)) >> 8;
-        }
+        if (m_matrix == nullptr) // while it's being replaced
+            return;
+        r = m_lut[r];
+        g = m_lut[g];
+        b = m_lut[b];
         // cast so that negative coords that wrapped in uint16_t get clipped by the canvas
         m_matrix->drawPixel((int16_t)x, (int16_t)y, m_matrix->color565(r, g, b));
     }
     void clear() override {
-        m_matrix->fillScreen(0);
+        if (m_matrix != nullptr)
+            m_matrix->fillScreen(0);
     }
     void flush() override {
-        m_matrix->show();
+        if (m_matrix != nullptr)
+            m_matrix->show();
     }
 
-    // Protomatter has no brightness control so it's done by scaling the colors
-    // takes effect on the next draw
-    void setBrightness(uint8_t v) {
-        m_brightness = v;
+    // Protomatter has no brightness control so it's done by scaling the colors, with the gamma curve:
+    // out = 255 * (v / 255) ^ gamma * brightness. gamma in tenths, 10 is none. takes effect on the next draw
+    void setBrightness(uint8_t brightness) {
+        if (brightness != m_brightness)
+            make_lut(brightness, m_gamma10);
+    }
+    void setGamma(int gamma10) {
+        gamma10 = constrain(gamma10, 5, 40);
+        if (gamma10 != m_gamma10)
+            make_lut(m_brightness, gamma10);
     }
     uint16_t color565(uint8_t r, uint8_t g, uint8_t b) {
-        return m_matrix->color565(r, g, b);
+        return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+    }
+    // the matrix is replaced when its bit depth changes
+    void setMatrix(Adafruit_Protomatter* matrix) {
+        m_matrix = matrix;
     }
 
 private:
     Adafruit_Protomatter* m_matrix;
-    uint8_t m_brightness = 255;
+    uint8_t m_brightness = 0;
+    int m_gamma10 = 0;
+    uint8_t m_lut[256];
+
+    void make_lut(uint8_t brightness, int gamma10) {
+        m_brightness = brightness;
+        m_gamma10 = gamma10;
+        float gamma = gamma10 / 10.0f;
+        for (int i = 0; i < 256; ++i) {
+            float v = powf(i / 255.0f, gamma) * 255.0f * (brightness + 1) / 256.0f;
+            m_lut[i] = (uint8_t)(v + 0.5f);
+        }
+    }
 };

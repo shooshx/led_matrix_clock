@@ -720,19 +720,24 @@ class Layout
     }
 }
 
-function download(url, cb)
+// cb(text) with the response, err_cb(message) if it failed
+function download(url, cb, err_cb=null)
 {
     const req = new XMLHttpRequest()
+    const fail = (msg)=>{
+        console.error("download " + url + ": " + msg)
+        if (err_cb !== null)
+            err_cb(msg)
+    }
     req.addEventListener("load", function() {
         if (this.readyState == 4 && this.status == 200) {
             cb(this.responseText)
             return
         }
-        const msg = "Error: " + this.readyState + "," + this.status + "," + this.responseText
-        console.error(msg)
+        fail("status " + this.status + " " + this.responseText)
     })
     req.addEventListener("error", function() {
-        console.error(msg)
+        fail("no response")
     })
     req.open("GET", url)
     req.send()
