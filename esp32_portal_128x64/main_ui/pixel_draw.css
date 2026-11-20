@@ -257,6 +257,22 @@ body {
 .prefs_status {
     margin-bottom: 10px;
 }
+.audio_top {
+    margin: 10px 0;
+}
+.audio_row {
+    margin-top: 15px;
+}
+.audio_label {
+    display: inline-block;
+    width: 90px;
+}
+.audio_slider {
+    width: 300px;
+    max-width: 55vw;
+    margin: 0 10px;
+    vertical-align: bottom;
+}
 
 .gfx_canvas {
     max-width: 100%;
@@ -375,7 +391,7 @@ body {
     margin-right: 10px;
     vertical-align: top;
 }
-/* the input that gets the typing of the text tool, not visible */
+/* the textarea that gets the typing of the text tool, not visible */
 .draw_text_input {
     position: fixed;
     left: 0;
@@ -387,30 +403,152 @@ body {
     padding: 0;
     font-size: 16px; /* so iOS doesn't zoom when it's focused */
     pointer-events: none;
+    resize: none;
+    overflow: hidden;
 }
 
-/* clock special times */
-.sp_box {
+/* clock faces through the day */
+.cf_box {
     border: solid 1px;
     border-radius: 8px;
     padding: 8px;
     margin: 10px 0;
-    width: max-content;
-    max-width: 100%;
+    max-width: 760px;
     box-sizing: border-box;
 }
-.sp_title {
+.cf_title {
     font-weight: bold;
-    cursor: pointer;
+    margin-bottom: 6px;
+}
+.cf_timeline {
+    margin: 0 8px 4px 8px;
+}
+.cf_bar {
+    position: relative;
+    height: 40px;
+    background-color: #222222;
+    border-radius: 4px;
     user-select: none;
 }
-.sp_content {
+.cf_seg {
+    position: absolute;
+    white-space: nowrap;
+    top: 0;
+    bottom: 0;
+    box-sizing: border-box;
+    border: solid 1px #000000;
+    cursor: pointer;
+    overflow: hidden;
+    opacity: 0.55;
+}
+/* the periods of the edited face are brighter, the selected period has a frame */
+.cf_seg[face=true] {
+    opacity: 1;
+}
+.cf_seg[selected=true] {
+    opacity: 1;
+    border: solid 3px #d3a8ff;
+}
+.cf_seg_label {
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: monospace;
+    font-size: 13px;
+    color: #000000;
+    background-color: #ffffffbb;
+    border-radius: 3px;
+    padding: 0 3px;
+    pointer-events: none;
+}
+/* the boundary between two periods, a wide invisible grip around a thin line */
+.cf_handle {
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    width: 16px;
+    margin-left: -8px;
+    cursor: ew-resize;
+    touch-action: none;
+    z-index: 2;
+}
+.cf_handle::after {
+    content: "";
+    position: absolute;
+    left: 6px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    border-radius: 2px;
+    background-color: #ffffff;
+    box-shadow: 0 0 2px #000000;
+}
+.cf_handle:hover::after {
+    background-color: #d3a8ff;
+}
+/* the time now */
+.cf_now {
+    position: absolute;
+    top: -6px;
+    bottom: -6px;
+    width: 0;
+    border-left: dashed 2px #ff3030;
+    pointer-events: none;
+    z-index: 1;
+}
+.cf_ticks {
+    position: relative;
+    height: 16px;
+    font-size: 12px;
+    color: #666666;
+}
+.cf_tick {
+    position: absolute;
+    transform: translateX(-50%);
+}
+.cf_period {
     margin-top: 6px;
 }
-.sp_tabs {
+.cf_line {
     margin-bottom: 8px;
 }
-.sp_chip {
+.cf_name {
+    font-weight: bold;
+    margin-right: 8px;
+}
+.cf_label {
+    margin: 0 4px;
+}
+.cf_time {
+    height: 27px;
+    font-size: 16px;
+}
+.cf_line .tm_btn {
+    margin-right: 6px;
+}
+.cf_line .tm_btn[disabled=true] {
+    opacity: 0.4;
+    cursor: default;
+}
+.cf_speed {
+    width: 150px;
+    vertical-align: middle;
+}
+.cf_pulse {
+    display: inline-block;
+    margin-left: 10px;
+}
+.cf_note {
+    font-size: 13px;
+    color: #666666;
+}
+
+/* the list of faces */
+.cf_face_list {
+    margin-bottom: 8px;
+}
+.cf_face_chip {
     display: inline-block;
     border: solid 1px #999999;
     border-radius: 12px;
@@ -418,55 +556,53 @@ body {
     margin: 0 4px 4px 0;
     cursor: pointer;
     background-color: #eeeeee;
-    color: #888888;
-    font-family: monospace;
+    user-select: none;
 }
-.sp_chip[on=true] {
-    color: #000000;
-}
-.sp_chip[selected=true] {
+.cf_face_chip[selected=true] {
     background-color: #d3a8ff;
     border-color: #7a3fc0;
     font-weight: bold;
 }
-.sp_line {
-    margin-bottom: 8px;
+.cf_face_dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 5px;
+    margin-right: 6px;
+    border: solid 1px #000000;
 }
-.sp_label {
-    margin: 0 4px;
+.cf_face_uses {
+    font-size: 12px;
+    color: #666666;
+    font-weight: normal;
 }
-.sp_time {
-    height: 27px;
+.cf_name_in {
+    height: 25px;
     font-size: 16px;
+    width: 160px;
+    margin-right: 8px;
 }
-.sp_speed {
-    width: 150px;
+
+/* "Show on panel" */
+.mirror_cont {
+    display: inline-block;
+    margin-left: 16px;
     vertical-align: middle;
 }
-.sp_pulse {
+
+/* to the period before / after */
+.cf_line .tm_btn.cf_nav {
+    margin: 0 2px;
+    padding: 4px 9px;
+    user-select: none;
+}
+.cf_nav_pos {
     display: inline-block;
-    margin-left: 10px;
-}
-.sp_colors {
-    margin: 4px 0 8px 0;
-}
-.sp_colors_hdr {
+    min-width: 48px;
+    text-align: center;
     font-size: 14px;
-    color: #666666;
-    margin-bottom: 4px;
 }
-.sp_color_row {
-    margin-bottom: 3px;
-}
-.sp_color_label {
-    display: inline-block;
-    min-width: 70px;
-}
-.sp_color_row .clock_col_in {
-    width: 80px;
-    margin-right: 4px;
-}
-.sp_note {
+.mirror_note {
     font-size: 13px;
     color: #666666;
 }

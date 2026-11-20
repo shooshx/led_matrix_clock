@@ -24,6 +24,7 @@
 #include "Buttons.h"
 #include "wifi_secrets.h"
 #include "ble_hid.h"
+#include "audio.h"
 
 #define DISPLAY_WIDTH 128
 #define DISPLAY_HEIGHT 64
@@ -35,6 +36,7 @@
 #include "DinoGame.h"
 #include "TetrisGame.h"
 #include "LifeGame.h"
+#include "DustGame.h"
 #include "Orientation.h"
 
 
@@ -71,6 +73,14 @@ bool has_display = false;
 bool g_admin = false;  // the hidden admin view, see AdminScreen
 bool g_force_redraw = false; // draw the current mode on the next loop
 volatile bool g_off_redraw = false; // blank the panel again in the off mode
+// from the web-ui (its own task), done in the loop: a section change or drawing turns the display on.
+// g_web_wake_section is the section to show if the display was off, -1 is the current one
+volatile bool g_web_wake = false;
+volatile int g_web_wake_section = -1;
+// prefs changed from the web-ui are saved by the loop SAVE_QUIET_MS after the last change (millis, 0 is none):
+// the clock faces are saved as blobs, a face copied from the web-ui is ~150 changes and one blob write
+volatile unsigned long g_save_at = 0;
+const unsigned long SAVE_QUIET_MS = 1000;
 
 // the off mode: nothing shown
 class OffScreen : public IScreen
@@ -105,13 +115,17 @@ const int HID_MODES[] = { SECTION_CLOCK, SECTION_STOPW, SECTION_TIMER, SECTION_D
 #define SECTION_BTN_FIRST SECTION_CLOCK
 #define SECTION_BTN_LAST SECTION_STOPW
 
-class TopState : public PropHolder<4>
+class TopState : public PropHolder<5>
 {
 public:
+    static const int MOVE_SLOW_MIN = 10, MOVE_SLOW_MAX = 20, MOVE_SLOW_STEP = 2;
+
     Prop<int16_t> active_section;
     Prop<uint16_t> brightness;
     Prop<int16_t> gamma;  // in tenths, 10 is 1.0, no correction
     Prop<int16_t> color_bits; // bits per color of the matrix, 2-6
+    // the remote's movement is divided by this, in tenths: 10 is normal, 20 moves half as much. from the admin view
+    Prop<int16_t> move_slow;
     Preferences m_pref;
 
     TopState(NamesIndex* prop_map)
@@ -120,6 +134,7 @@ public:
       , brightness(this, "brightness", 255)
       , gamma(this, "gamma", 10)
       , color_bits(this, "color_bits", 4)
+      , move_slow(this, "move_slow", MOVE_SLOW_MIN)
     {}
 
     void load() {
@@ -160,6 +175,7 @@ public:
     DinoGame dino;
     TetrisGame tetris;
     LifeGame life;
+    DustGame dust;
     GamesState games;
     IScreen* m_cur_screen = nullptr;
 
@@ -168,7 +184,7 @@ public:
         , top(&m_prop_map)
         , timer(&m_prop_map)
         , stopw(&m_prop_map)
-        , games({&dino, &tetris, &life})
+        , games({&dino, &tetris, &life, &dust})
     {
     }
 
@@ -221,6 +237,7 @@ State* state = nullptr;
 void setupPins()
 {
   pinMode(LED_BUILTIN, OUTPUT);
+  audio_begin();
 }
 
 void setupSerial()
@@ -340,7 +357,26 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
 
     char cmd = (char)v[0];
     char subcmd = (char)v[1];
-    if (cmd == 'U')
+    if (cmd == 'U' && subcmd == 'T')
+    {
+        // UT <name> <text>: a text pref, the text is to the end of the line
+        String line((char*)&v[0]);
+        int sp1 = line.indexOf(' ');
+        int sp2 = sp1 < 0 ? -1 : line.indexOf(' ', sp1 + 1);
+        if (sp1 < 0) {
+            Serial.printf("Unexpected UT %s\n", line.c_str());
+            return;
+        }
+        String name = sp2 < 0 ? line.substring(sp1 + 1) : line.substring(sp1 + 1, sp2);
+        String text = sp2 < 0 ? String("") : line.substring(sp2 + 1);
+        Serial.printf("prop update %s '%s'\n", name.c_str(), text.c_str());
+        IProp* prop = state->m_prop_map.get(name);
+        if (prop == nullptr)
+            Serial.printf("prop not found %s\n", name.c_str());
+        else if (prop->setText(text))
+            g_save_at = millis() | 1;
+    }
+    else if (cmd == 'U')
     {
         String sp[3];
         String line((char*)&v[0]);
@@ -352,30 +388,39 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
         }
         int v = sp[2].toInt();
         Serial.printf("prop update %s %d\n", sp[1].c_str(), v);
-        if (state->update_prop(sp[1], v)) {
-            state->save();
+        if (sp[1] == "active_section") { // opening a tab, also the same one again
+            g_web_wake_section = -1;
+            g_web_wake = true;
         }
+        if (state->update_prop(sp[1], v))
+            g_save_at = millis() | 1;  // saved by the loop when the changes stop
     }
     else if (cmd == 'D')
     {
+        if (subcmd == 'P' || subcmd == 'X' || subcmd == 'I') { // drawing shows it if the display was off
+            g_web_wake_section = (subcmd == 'I') ? SECTION_IMAGE : SECTION_DRAW;
+            g_web_wake = true;
+        }
         if (subcmd == 'P')
             parse_pixel_cmd(v, [](int x, int y, uint16_t c) { state->drawtext.set_pixel(x, y, c); });
         else if (subcmd == 'X')  // clear of the draw tab, the drawing and the text
             state->drawtext.clear_all();
         else if (subcmd == 'C')  // the off tab, the loop blanks the panel
             g_off_redraw = true;
-        else if (subcmd == 'I')
+        else if (subcmd == 'I') {
             parse_img_cmd(v, [](int x, int y, uint16_t c) { state->image.set_pixel(x, y, c); });
+            state->image.changed();
+        }
         else
             Serial.printf("Unknown D subcmd %c\n", subcmd);
     }
-    else if (cmd == 'S' && subcmd == 'D')
+    else if (cmd == 'S' && subcmd == 'M')
     {
-        // SD <n>: show special period n on the clock for a while, -1 stops
+        // SM <minute>: the clock shows that minute of the day for a while ("Show on panel"), -1 stops
         String sp[2];
         String line((char*)&v[0]);
         if (strSplit(line, sp, 2) == 2)
-            state->clock_state.demo(sp[1].toInt());
+            state->clock_state.m_panel.simulate(sp[1].toInt());
     }
     else if (cmd == 'T')
     {
@@ -405,6 +450,26 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
                 Serial.printf("Unknown T subcmd %c\n", subcmd);
         }
     }
+    else if (cmd == 'A')
+    {
+        // the audio tab's test beep. AB <0/1>: on/off, AF <hz>: frequency, AV <percent>: volume
+        String sp[2];
+        String line((char*)&v[0]);
+        int count = strSplit(line, sp, 2);
+        if (count != 2) {
+            Serial.printf("Unexpected number of arguments to A %d\n", count);
+            return;
+        }
+        int val = sp[1].toInt();
+        if (subcmd == 'B')
+            audio_beep(val != 0);
+        else if (subcmd == 'F')
+            audio_set_freq(val);
+        else if (subcmd == 'V')
+            audio_set_volume(val);
+        else
+            Serial.printf("Unknown A subcmd %c\n", subcmd);
+    }
     else
     {
         Serial.printf("Unknown command %c\n", cmd);
@@ -430,6 +495,25 @@ struct FragmentCombine
 } g_frag;
 
 
+// the web-ui sends the pref updates ("U ...", "UT ...") together, one per line, in messages of up to about 1K:
+// hundreds of small messages (a clock face copied, prefs uploaded) were sometimes lost.
+// only text messages that start with U are split, the binary ones (DP, DI) may have any byte
+void handleWebSocketData(const uint8_t* data, size_t len)
+{
+    if (len == 0 || data[0] != 'U' || memchr(data, '\n', len) == nullptr) {
+        handleWebSocketMessage(data, len);
+        return;
+    }
+    size_t start = 0;
+    while (start < len) {
+        const uint8_t* nl = (const uint8_t*)memchr(data + start, '\n', len - start);
+        size_t end = nl ? (size_t)(nl - data) : len;
+        if (end > start)
+            handleWebSocketMessage(data + start, end - start);
+        start = end + 1;
+    }
+}
+
 void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
     case WS_EVT_CONNECT:
@@ -443,10 +527,10 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
       if (len != info->len) {
           auto total_len = g_frag.add(data, len, info->index);
           if (total_len == info->len)
-            handleWebSocketMessage(g_frag.m_d.data(), g_frag.m_d.size());
+            handleWebSocketData(g_frag.m_d.data(), g_frag.m_d.size());
       }
       else if (info->final && info->index == 0 && info->len == len && (info->opcode == WS_TEXT || info->opcode == WS_BINARY)) {
-          handleWebSocketMessage(data, len);
+          handleWebSocketData(data, len);
       }
       else {
           Serial.printf("Unhandled WS event\n");
@@ -475,6 +559,39 @@ struct SpiRamAllocator : ArduinoJson::Allocator {
     void deallocate(void* p) override { heap_caps_free(p); }
     void* reallocate(void* p, size_t size) override { return heap_caps_realloc(p, size, MALLOC_CAP_SPIRAM); }
 };
+
+// the ETag of a file of the web-ui: for a .gz (made by gzip_web.py) the one the web server sends with it,
+// made from the CRC at its end, with the digits in its order (AsyncWebServerRequest::_getEtag, private).
+// else its size. gz says which. empty if there's no such file
+String fileEtag(const char* path, bool& gz)
+{
+    // exists() first, open() of a missing file logs an error
+    String gz_path = String(path) + ".gz";
+    gz = LittleFS.exists(gz_path);
+    if (gz) {
+        File f = LittleFS.open(gz_path, "r");
+        if (f && f.size() > 8 && f.seek(f.size() - 8)) {
+            uint32_t crc = 0;
+            f.read((uint8_t*)&crc, sizeof(crc));
+            static const char hex[] = "0123456789ABCDEF";
+            const int shifts[8] = { 4, 0, 12, 8, 20, 16, 28, 24 };
+            char buf[11];
+            buf[0] = '"';
+            for (int i = 0; i < 8; ++i)
+                buf[1 + i] = hex[(crc >> shifts[i]) & 0x0F];
+            buf[9] = '"';
+            buf[10] = 0;
+            return buf;
+        }
+        return "";
+    }
+    if (LittleFS.exists(path)) {
+        File f = LittleFS.open(path, "r");
+        if (f)
+            return "\"s" + String((unsigned)f.size()) + "\"";
+    }
+    return "";
+}
 
 void setupWeb()
 {
@@ -514,6 +631,85 @@ void setupWeb()
         request->send(response);
     });
 
+    // many prefs at once, a json like the one of GET /pref (nested or not, any part of it): the prefs tab's
+    // upload, a clock face copied. one request instead of hundreds of websocket updates, that were sometimes
+    // lost. the body is collected in PSRAM. the answer says what was done:
+    // {"applied": n, "unknown": [names], "bad": [names with a value that isn't a number, true/false or a text]}
+    server.on("/pref", HTTP_POST, [](AsyncWebServerRequest *request){
+        char* body = (char*)request->_tempObject;
+        if (body == nullptr) {
+            request->send(400, "text/plain", "no body");
+            return;
+        }
+        static SpiRamAllocator allocator;
+        JsonDocument doc(&allocator);
+        DeserializationError err = deserializeJson(doc, body);
+        if (err) {
+            request->send(400, "text/plain", String("bad json: ") + err.c_str());
+            return;
+        }
+        JsonDocument answer(&allocator);
+        JsonArray unknown = answer["unknown"].to<JsonArray>();
+        JsonArray bad = answer["bad"].to<JsonArray>();
+        int applied = 0;
+        bool changed = false;
+        // the json of GET /pref has these too, they aren't prefs
+        const char* not_prefs[] = { "rotation", "color_bits_actual" };
+        std::function<void(JsonObjectConst)> apply = [&](JsonObjectConst obj) {
+            for (JsonPairConst kv : obj) {
+                const char* name = kv.key().c_str();
+                JsonVariantConst v = kv.value();
+                if (v.is<JsonObjectConst>()) {
+                    apply(v.as<JsonObjectConst>());
+                    continue;
+                }
+                bool skip = false;
+                for (const char* np : not_prefs)
+                    skip |= strcmp(name, np) == 0;
+                if (skip)
+                    continue;
+                IProp* prop = state->m_prop_map.get(name);
+                if (prop == nullptr) {
+                    unknown.add(name);
+                    continue;
+                }
+                if (v.is<bool>())
+                    changed |= prop->setInt(v.as<bool>() ? 1 : 0);
+                else if (v.is<int>())
+                    changed |= prop->setInt(v.as<int>());
+                else if (v.is<const char*>())
+                    changed |= prop->setText(v.as<const char*>());
+                else {
+                    bad.add(name);
+                    continue;
+                }
+                ++applied;
+            }
+        };
+        apply(doc.as<JsonObjectConst>());
+        answer["applied"] = applied;
+        Serial.printf("POST /pref: %d applied, %d unknown, %d bad\n", applied, (int)unknown.size(), (int)bad.size());
+        if (changed)
+            g_save_at = millis() | 1;  // saved by the loop
+        String* out = new String();
+        serializeJson(answer, *out);
+        request->send(200, "application/json", *out);
+        delete out;
+    }, nullptr, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+        const size_t MAX_BODY = 128 * 1024;
+        if (total > MAX_BODY)
+            return;  // no body, the request answers 400
+        if (index == 0) {
+            // freed with the request (free() works for heap_caps_malloc too)
+            request->_tempObject = heap_caps_malloc(total + 1, MALLOC_CAP_SPIRAM);
+            if (request->_tempObject == nullptr)
+                return;
+            ((char*)request->_tempObject)[total] = 0;
+        }
+        if (request->_tempObject != nullptr && index + len <= total)
+            memcpy((char*)request->_tempObject + index, data, len);
+    });
+
     // the drawing and the text as they are shown, in the current orientation, for the web-ui draw tab:
     // width and height as 16 bit little endian and then the pixels as RGB
     server.on("/drawing", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -538,9 +734,23 @@ void setupWeb()
         request->send(200, "text/plain", String(state->drawtext.version()));
     });
 
-    // browsers want the correct mime type for streaming wasm compilation
+    // browsers want the correct mime type for streaming wasm compilation, so not by serveStatic.
+    // with an ETag like serveStatic, so that a reload doesn't get the big file again
     server.on("/asm_gfx.wasm", HTTP_GET, [](AsyncWebServerRequest *request){
-        request->send(LittleFS, "/asm_gfx.wasm", "application/wasm");
+        // the files change only with uploadfs, that restarts
+        static bool gz = false;
+        static String etag = fileEtag("/asm_gfx.wasm", gz);
+        if (etag.length() > 0 && request->header("If-None-Match") == etag) {
+            request->send(304);
+            return;
+        }
+        // sends /asm_gfx.wasm.gz compressed if there's no /asm_gfx.wasm, then with the ETag and no-cache
+        AsyncWebServerResponse* response = request->beginResponse(LittleFS, "/asm_gfx.wasm", "application/wasm");
+        if (!gz && etag.length() > 0) { // the same for the uncompressed one
+            response->addHeader("ETag", etag);
+            response->addHeader("Cache-Control", "no-cache"); // may be kept, asking each time if it changed
+        }
+        request->send(response);
     });
 
     server.serveStatic("/", LittleFS, "/").setDefaultFile("main.html");
@@ -724,7 +934,8 @@ bool updateTime()
 }
 
 
-// The hidden admin view: when the board's Up or Down button is held while it starts.
+// The hidden admin view: when the board's Up or Down button is held while it starts,
+// or when the remote's Power turns the display on while Home is held.
 // a list of lines, the remote's Up/Down select one, Left/Right change the editable ones, Back goes to the clock.
 // a reset without holding a button goes back to the clock
 
@@ -805,12 +1016,12 @@ public:
     }
 
 private:
-    enum { L_IP, L_DNS, L_TZ, L_BRIGHTNESS, L_REMOTE, LINES };
+    enum { L_IP, L_SIGNAL, L_DNS, L_TZ, L_BRIGHTNESS, L_MOVE, L_REMOTE, L_IMU, LINES };
     int m_sel = 0;
     bool m_need_draw = true;
     unsigned long m_last_draw = 0;
 
-    static bool editable(int i) { return i == L_TZ || i == L_BRIGHTNESS; }
+    static bool editable(int i) { return i == L_TZ || i == L_BRIGHTNESS || i == L_MOVE; }
 
     static const int CHAR_W = 4; // the 4x6 font
     static const int LINE_H = 7;
@@ -834,6 +1045,10 @@ private:
             auto& b = state->top.brightness;
             b.set(constrain((int)b.get() + d * 16, 0, 255));
         }
+        else if (m_sel == L_MOVE) {
+            auto& m = state->top.move_slow;
+            m.set(constrain(m.get() + d * TopState::MOVE_SLOW_STEP, TopState::MOVE_SLOW_MIN, TopState::MOVE_SLOW_MAX));
+        }
         else
             return;
         state->save();
@@ -847,6 +1062,13 @@ private:
     String text(int i) {
         switch (i) {
             case L_IP:  return wifiStatusText();
+            case L_SIGNAL: {
+                if (WiFi.status() != WL_CONNECTED)
+                    return "Signal -";
+                int rssi = WiFi.RSSI();
+                const char* q = rssi >= -55 ? "great" : rssi >= -67 ? "good" : rssi >= -75 ? "fair" : "weak";
+                return String("Signal ") + rssi + " dBm " + q;
+            }
             case L_DNS: return String(MDNS_NAME) + ".local";
             case L_TZ: {
                 int tz = state->clock_state.m_panel.m_tz_offset.get();
@@ -854,9 +1076,18 @@ private:
             }
             case L_BRIGHTNESS:
                 return "Brightness " + value(i, String(state->top.brightness.get()));
+            case L_MOVE: // 1.0 is normal, 2.0 moves the cursor half as much
+                return "Move sensitivity " + value(i, String(state->top.move_slow.get() / 10.0f, 1));
             case L_REMOTE: {
                 const char* d = ble_hid_device();
                 return String("Remote ") + (*d ? d : "searching");
+            }
+            case L_IMU: {
+                if (!orientation.found())
+                    return "IMU not found";
+                char buf[40];
+                snprintf(buf, sizeof(buf), "IMU x=%.1f y=%.1f z=%.1f", orientation.ax(), orientation.ay(), orientation.az());
+                return buf;
             }
         }
         return "";
@@ -932,13 +1163,41 @@ bool handleStopwatchKey(const HidEvent& ev)
   return false;
 }
 
-// the Power key of the remote turns the display off, Power again or Up/Down turn it back on
+// the Power key of the remote turns the display off, Power again or Up/Down turn it back on.
+// Power while Home is held turns it on in the admin view
 bool g_display_off = false;
+bool g_home_held = false;
+
+// the remote's movement divided by the admin view's move sensitivity. the fractions are kept for the next
+// movement, so slow movements still move
+HidEvent scaleMove(const HidEvent& ev)
+{
+  static float rest_x = 0, rest_y = 0;
+  int slow = state->top.move_slow.get();
+  if (ev.type != HidEvent::MOVE || slow <= TopState::MOVE_SLOW_MIN)
+    return ev;
+  HidEvent r = ev;
+  rest_x += ev.dx * 10.0f / slow;
+  rest_y += ev.dy * 10.0f / slow;
+  r.dx = (int16_t)rest_x;  // towards 0, the rest has the same sign
+  r.dy = (int16_t)rest_y;
+  rest_x -= r.dx;
+  rest_y -= r.dy;
+  return r;
+}
 
 void handleHidEvent(const HidEvent& ev)
 {
   bool press = ev.type == HidEvent::KEY_DOWN && !ev.repeat;
+  // a remote that sends one key at a time sends the Power press before the release of Home
+  if (ev.key == HID_KEY_REMOTE_HOME && ev.type != HidEvent::MOVE)
+    g_home_held = ev.type == HidEvent::KEY_DOWN;
   if (press && ev.key == HID_KEY_POWER) {
+    if (g_display_off && g_home_held && !g_admin) {
+      Serial.println("display on, admin view");
+      g_admin = true;
+      g_force_redraw = true;
+    }
     g_display_off = !g_display_off;
     Serial.printf("display %s\n", g_display_off ? "off" : "on");
     return;
@@ -1042,7 +1301,40 @@ void loop(void)
 
   HidEvent hid_ev;
   while (ble_hid_poll(hid_ev))
-    handleHidEvent(hid_ev);
+    handleHidEvent(scaleMove(hid_ev));
+
+  // the web-ui opened a tab or draws: the display turns on, drawing shows the draw (or image) mode
+  if (g_web_wake) {
+    g_web_wake = false;
+    if (g_display_off) {
+      g_display_off = false;
+      int s = g_web_wake_section;
+      Serial.printf("display on from the web-ui, section %d\n", s);
+      if (s >= 0 && s != state->top.active_section.get())
+        set_section(s);
+    }
+  }
+
+  // the prefs from the web-ui, when they stopped changing
+  unsigned long save_at = g_save_at;
+  if (save_at != 0 && millis() - save_at >= SAVE_QUIET_MS) {
+    g_save_at = 0;
+    state->save();
+  }
+
+  // a period whose face has "show when it starts" starts: the clock is shown, whatever was shown, also when the
+  // display was off or in a game. only when the time is known (from NTP), not when it's already on at boot
+  static int prev_wake = -2;
+  if (g_epoch_time > 1600000000UL) {
+    int wp = state->clock_state.m_panel.wake_period(g_epoch_time);
+    if (wp >= 0 && wp != prev_wake && prev_wake != -2) {
+      Serial.printf("period %d starts, to the clock\n", wp);
+      g_display_off = false;
+      if (state->top.active_section.get() != SECTION_CLOCK)
+        set_section(SECTION_CLOCK);
+    }
+    prev_wake = wp;
+  }
 
   int section = state->top.active_section.get();
   int brightness = state->top.brightness.get();
@@ -1136,7 +1428,8 @@ void loop(void)
   if (screen != nullptr && has_display && !g_display_off) {
     state->m_cur_screen = screen;
     screen->draw();
-    if (!g_admin)
+    // not in the admin view, and not when the clock's face is off: then nothing is lit
+    if (!g_admin && !(section == SECTION_CLOCK && state->clock_state.dark()))
       drawModeIcon(section);
     // finish() flushes the halo drawer, it has the kept outlined text and then flushes the matrix
     display.setDrawer(&halo_drawer);

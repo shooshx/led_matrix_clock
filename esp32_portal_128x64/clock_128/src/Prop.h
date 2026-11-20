@@ -1,5 +1,6 @@
 #pragma once
 #include <unordered_map>
+#include <vector>
 #include "base_utils.h"
 
 class IProp
@@ -13,6 +14,20 @@ public:
         Serial.printf("bad setInt in IProp");
         return false;
     }
+    // a text pref (TextProp)
+    virtual bool setText(const String& v) {
+        Serial.printf("bad setText in IProp");
+        return false;
+    }
+
+    // the values in a blob instead of a Preferences key each, see BlobHolder.
+    // in the order the props were made, so new props have to be added at the end of a blob holder
+    virtual size_t blob_size() const { return 0; }
+    virtual void to_blob(uint8_t*& p) const {}
+    // p moves on, values past end aren't read (a blob from before props were added) and keep their defaults
+    virtual void from_blob(const uint8_t*& p, const uint8_t* end) {}
+    virtual bool is_dirty() const { return false; }
+    virtual void clear_dirty() {}
 
     IProp(const IProp&) = delete;
     IProp& operator=(const IProp&) = delete;
@@ -48,7 +63,6 @@ public:
         return m_index.size();
     }
     void add(const String& name, IProp* prop) {
-        Serial.printf("Adding prop %s\n", name.c_str());
         m_index[name] = prop;
     }
     IProp* get(const String& name) const {
@@ -118,6 +132,31 @@ public:
         Serial.printf("bad in PropHolder");
         return false;
     }
+
+    size_t blob_size() const override {
+        size_t n = 0;
+        for(int i = 0; i < m_sz; ++i)
+            n += m_arr[i]->blob_size();
+        return n;
+    }
+    void to_blob(uint8_t*& p) const override {
+        for(int i = 0; i < m_sz; ++i)
+            m_arr[i]->to_blob(p);
+    }
+    void from_blob(const uint8_t*& p, const uint8_t* end) override {
+        for(int i = 0; i < m_sz; ++i)
+            m_arr[i]->from_blob(p, end);
+    }
+    bool is_dirty() const override {
+        for(int i = 0; i < m_sz; ++i)
+            if (m_arr[i]->is_dirty())
+                return true;
+        return false;
+    }
+    void clear_dirty() override {
+        for(int i = 0; i < m_sz; ++i)
+            m_arr[i]->clear_dirty();
+    }
 private:
     IProp* m_arr[N];
     int m_sz = 0;
@@ -176,6 +215,20 @@ public:
         Serial.printf("bad in Prop %s\n", m_name.c_str());
         return false;
     };
+
+    size_t blob_size() const override { return sizeof(T); }
+    void to_blob(uint8_t*& p) const override {
+        memcpy(p, &m_value, sizeof(T));
+        p += sizeof(T);
+    }
+    void from_blob(const uint8_t*& p, const uint8_t* end) override {
+        if (p + sizeof(T) <= end)
+            memcpy(&m_value, p, sizeof(T));
+        p += sizeof(T);
+        m_dirty = false;
+    }
+    bool is_dirty() const override { return m_dirty; }
+    void clear_dirty() override { m_dirty = false; }
 };
 
 template<>
@@ -249,3 +302,115 @@ bool Prop<int16_t>::setInt(int v) {
     //Serial.printf("setInt(16) %s to %d from %d\n", m_name.c_str(), v, m_value);
     return set(static_cast<int16_t>(v));
 }
+
+// -----------------------------------------------
+
+// a short text, like the name of a clock face. sent from the web-ui with "UT name text", in the json as a string
+class TextProp : public IProp
+{
+public:
+    static const int MAX_LEN = 16;
+
+    TextProp(IPropHolder* holder, const String& name, const char* init_value)
+      : m_name(name), m_key(nvs_key(name))
+    {
+        m_value[0] = 0;
+        set(init_value);
+        m_dirty = false;
+        holder->reg(this, &m_name);
+    }
+
+    char m_value[MAX_LEN + 1];
+    String m_name;
+    String m_key;
+    bool m_dirty = false;
+
+    bool set(const char* v) {
+        char buf[MAX_LEN + 1];
+        snprintf(buf, sizeof(buf), "%s", v);
+        if (strcmp(buf, m_value) == 0)
+            return false;
+        memcpy(m_value, buf, sizeof(buf));
+        m_dirty = true;
+        return true;
+    }
+    const char* get() const {
+        return m_value;
+    }
+    bool setText(const String& v) override {
+        return set(v.c_str());
+    }
+    void load(Preferences& pref) override {
+        if (pref.isKey(m_key.c_str()))
+            pref.getString(m_key.c_str(), m_value, sizeof(m_value));
+        m_dirty = false;
+    }
+    bool save(Preferences& pref) override {
+        if (!m_dirty)
+            return false;
+        pref.putString(m_key.c_str(), m_value);
+        m_dirty = false;
+        return true;
+    }
+    void toJson(const JsonObject& obj) override {
+        obj[m_name] = String(m_value);  // copied into the json
+    }
+    // a fixed size in a blob, with the terminating 0
+    size_t blob_size() const override { return sizeof(m_value); }
+    void to_blob(uint8_t*& p) const override {
+        memcpy(p, m_value, sizeof(m_value));
+        p += sizeof(m_value);
+    }
+    void from_blob(const uint8_t*& p, const uint8_t* end) override {
+        if (p + sizeof(m_value) <= end) {
+            memcpy(m_value, p, sizeof(m_value));
+            m_value[MAX_LEN] = 0;
+        }
+        p += sizeof(m_value);
+        m_dirty = false;
+    }
+    bool is_dirty() const override { return m_dirty; }
+    void clear_dirty() override { m_dirty = false; }
+};
+
+// -----------------------------------------------
+
+// props that are saved together as one Preferences blob under the key, instead of a key each.
+// for groups with many props, like a clock face: Preferences (NVS) has room for only a few hundred keys.
+// the props are still separate for the web-ui (names, toJson, setInt). the blob is the values one after the
+// other in the order the props were made, a blob from before props were added at the end still loads
+template<int N>
+class BlobHolder : public PropHolder<N>
+{
+public:
+    BlobHolder(IPropHolder* parent, const String& key)
+      : PropHolder<N>(parent), m_key(key)
+    {}
+
+    String m_key;
+
+    void load(Preferences& pref) override {
+        size_t n = pref.isKey(m_key.c_str()) ? pref.getBytesLength(m_key.c_str()) : 0;
+        if (n > 0) {
+            std::vector<uint8_t> buf(n);
+            pref.getBytes(m_key.c_str(), buf.data(), n);
+            const uint8_t* p = buf.data();
+            this->from_blob(p, buf.data() + n);
+        }
+        this->clear_dirty();
+        this->child_changed();
+    }
+
+    bool save(Preferences& pref) override {
+        if (!this->is_dirty())
+            return false;
+        std::vector<uint8_t> buf(this->blob_size());
+        uint8_t* p = buf.data();
+        this->to_blob(p);
+        if (pref.putBytes(m_key.c_str(), buf.data(), buf.size()) != buf.size())
+            Serial.printf("Failed saving blob %s, %d bytes\n", m_key.c_str(), (int)buf.size());
+        this->clear_dirty();
+        this->child_changed();
+        return true;
+    }
+};

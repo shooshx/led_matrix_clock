@@ -92,7 +92,8 @@ public:
     virtual const char* pause_option(int i) const { return nullptr; }
     virtual bool on_pause_key(uint16_t key) { return false; }
     virtual void start() = 0;                 // to its start screen
-    virtual void tick() = 0;                  // a frame, FPS per second
+    virtual void tick() = 0;                  // a frame, fps() per second
+    virtual int fps() const;                  // GamesState::FPS unless the game wants another rate
     virtual void on_hid(const HidEvent& ev) = 0;
     virtual void draw() = 0;
 };
@@ -164,18 +165,34 @@ public:
 
     // called in loop, returns true if need to draw
     bool update() {
-        unsigned long now = millis();
-        bool frame = now - m_last_frame >= FRAME_MS;
-        if (frame)
-            m_last_frame = now;
+        unsigned long now = micros();
+        unsigned long frame_us = 1000000UL / (m_playing ? game()->fps() : FPS);
+        bool frame = now - m_last_frame >= frame_us;
+        if (frame) {
+            // on a fixed beat, so a late frame doesn't make the following ones late too.
+            // more than a frame behind (something blocked the loop) starts the beat again
+            m_last_frame += frame_us;
+            if (now - m_last_frame >= frame_us)
+                m_last_frame = now;
+        }
         if (m_playing && !m_paused && orientation_ok()) {
             if (frame) {
                 game()->tick();
                 m_need_draw = true;
+                // the real frame rate, to see if the loop keeps up
+                ++m_fps_frames;
+                if (now - m_fps_start >= 5000000UL) {
+                    if (m_fps_frames > 1)
+                        Serial.printf("games: %s %.1f fps (wanted %d)\n", game()->name(),
+                                      (m_fps_frames - 1) * 1e6f / (now - m_fps_start), game()->fps());
+                    m_fps_start = now;
+                    m_fps_frames = 1;
+                }
             }
         }
-        else if (now - m_last_anim >= 250) { // the blinking in the menu and messages
+        else if (now - m_last_anim >= 250000UL) { // the blinking in the menu and messages
             m_last_anim = now;
+            m_fps_frames = 0;
             ++m_anim;
             m_need_draw = true;
         }
@@ -204,8 +221,10 @@ private:
     bool m_playing = false;
     bool m_paused = false;
     bool m_need_draw = true;
-    unsigned long m_last_frame = 0;
-    unsigned long m_last_anim = 0;
+    unsigned long m_last_frame = 0; // micros
+    unsigned long m_last_anim = 0;  // micros
+    unsigned long m_fps_start = 0;
+    int m_fps_frames = 0;
     int m_anim = 0;
     Preferences m_pref;
 
@@ -287,3 +306,5 @@ private:
             draw_text_center(y + 3 + i * 9, lines[i].text, lines[i].color);
     }
 };
+
+inline int Game::fps() const { return GamesState::FPS; }

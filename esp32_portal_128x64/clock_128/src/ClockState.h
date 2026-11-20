@@ -30,9 +30,6 @@ struct TextBlockN : public PropHolder<8 + NParentPropNum>
     Prop<bool> m_double_size; // every font pixel is 2x2
     Prop<bool> m_show;
     TextAlign m_align = LEFT_ALIGN;
-    // colors of the special times, instead of m_color / m_outline_color. -1 is none
-    int32_t m_color_override = -1;
-    int32_t m_outline_override = -1;
 
     TextBlockN(IPropHolder* parent, const String& name, TextAlign align = LEFT_ALIGN, bool show = true)
       : PropHolder<8 + NParentPropNum>(parent), m_name(name)
@@ -62,11 +59,9 @@ struct TextBlockN : public PropHolder<8 + NParentPropNum>
     // outlined text goes through the halo drawer that draws the outline immediately and
     // keeps the text itself until flush so that it's on top of all outlines
     void begin_draw() {
-        // in a special time its outline color decides: black is no outline, else an outline in that color
-        bool outline = (m_outline_override >= 0) ? (m_outline_override != 0) : m_outline.get();
-        if (outline) {
+        if (m_outline.get()) {
             uint8_t r, g, b;
-            color888(m_outline_override >= 0 ? (uint16_t)m_outline_override : m_outline_color.get(), r, g, b);
+            color888(m_outline_color.get(), r, g, b);
             halo_drawer.setMyColor(r, g, b);
             display.setDrawer(&halo_drawer);
         }
@@ -84,7 +79,7 @@ struct TextBlockN : public PropHolder<8 + NParentPropNum>
             display.setFont(nullptr);
         else
             display.setFont(all_fonts[m_font_index.get()].fontPtr);
-        display.setTextColor(m_color_override >= 0 ? (uint16_t)m_color_override : m_color.get());
+        display.setTextColor(m_color.get());
         display.setTextSize(text_size());
     }
     int text_size() const {
@@ -451,7 +446,7 @@ struct TimeLayout : public PropHolder<5>
 };
 
 
-// ---- special times: periods of the day when the clock has other colors and a background effect ----
+// ---- background effects of the clock faces ----
 
 enum SpecialEffect {
   FX_NONE = 0,
@@ -459,119 +454,67 @@ enum SpecialEffect {
   FX_SLIDE = 2,   // a band that fades to black on its sides and sweeps from side to side
 };
 
-const int CLOCK_TEXTS = 9; // the texts of a clock layout, in the order of ClockLayout::texts()
-
-// a period of the day and how the clock looks in it. same as SpecialPeriod in the web-ui
-struct SpecialPeriod : public PropHolder<5 + 2 * CLOCK_TEXTS + 5>
+// the brightness of an effect (0-1) as the leds should light it to look like the web-ui's preview.
+// a screen shows dim colors much darker than they are (its gamma), leds light them as they are: the faint end of
+// a fade, that is almost black on the screen, was clearly lit on the panel and stopped at once instead of fading
+// to black. only for the effects, the panel's gamma pref is for everything
+const float EFFECT_GAMMA = 2.2f;
+inline float led_level(float a)
 {
-    Prop<bool> m_on;
-    Prop<int16_t> m_from;     // minutes of the day
-    Prop<int16_t> m_to;       // the end, not included. before m_from goes over midnight
-    Prop<int16_t> m_fx;
-    Prop<uint16_t> m_fx_color;
-    Prop<int16_t> m_fx_size;  // thickness in pixels
-    Prop<int16_t> m_fx_speed; // 1-10
-    Prop<bool> m_fx_pulse;    // the border pulses
-    Prop<uint16_t>* m_colors[CLOCK_TEXTS];
-    Prop<uint16_t>* m_outlines[CLOCK_TEXTS];
+    return a <= 0 ? 0 : powf(a, EFFECT_GAMMA);
+}
 
-    SpecialPeriod(IPropHolder* parent, const String& name)
-      : PropHolder(parent)
-      , m_on(this, name + "_on", false)
-      , m_from(this, name + "_from", 19 * 60)
-      , m_to(this, name + "_to", 20 * 60)
-      , m_fx(this, name + "_fx", FX_BORDER)
-      , m_fx_color(this, name + "_fx_col", 0xF800)
-      , m_fx_size(this, name + "_fx_size", 8)
-      , m_fx_speed(this, name + "_fx_speed", 3)
-      , m_fx_pulse(this, name + "_fx_pulse", true)
-    {
-        for (int i = 0; i < CLOCK_TEXTS; ++i) {
-            m_colors[i] = new Prop<uint16_t>(this, name + "_c" + i, 0xFFFF);    // white
-            m_outlines[i] = new Prop<uint16_t>(this, name + "_o" + i, 0);  // black: no outline
+// the background effect, over the clock's background and under the texts. t in seconds.
+// same as draw_effect() in the web-ui, but the leds get led_level() of its brightness
+void draw_effect(int fx, uint16_t color, int fx_size, int fx_speed, bool pulse, float t)
+{
+    int w = display.width(), h = display.height();
+    uint8_t r, g, b;
+    color888(color, r, g, b);
+    int size = constrain(fx_size, 1, 64);
+    float speed = constrain(fx_speed, 1, 10);
+    if (fx == FX_BORDER) {
+        float k = 1.0f;
+        if (pulse)
+            k = 0.6f + 0.4f * sinf(2 * PI * t * speed / 6.0f);
+        // the color of each ring, d pixels from the edge
+        uint8_t ring[64][3];
+        for (int d = 0; d < size; ++d) {
+            float a = 1.0f - (float)d / size;
+            a = led_level(a * a * k);
+            ring[d][0] = r * a;
+            ring[d][1] = g * a;
+            ring[d][2] = b * a;
         }
-    }
-
-    bool active_at(int minute) const {
-        if (!m_on.get())
-            return false;
-        int from = m_from.get(), to = m_to.get();
-        if (from <= to)
-            return minute >= from && minute < to;
-        return minute >= from || minute < to; // over midnight
-    }
-
-    bool animated() const {
-        return m_fx.get() == FX_SLIDE || (m_fx.get() == FX_BORDER && m_fx_pulse.get());
-    }
-
-    // the background effect, over the clock's background and under the texts. t in seconds.
-    // same as draw_effect() in the web-ui
-    void draw_effect(float t) const {
-        int w = display.width(), h = display.height();
-        uint8_t r, g, b;
-        color888(m_fx_color.get(), r, g, b);
-        int size = constrain((int)m_fx_size.get(), 1, 64);
-        float speed = constrain((int)m_fx_speed.get(), 1, 10);
-        if (m_fx.get() == FX_BORDER) {
-            float k = 1.0f;
-            if (m_fx_pulse.get())
-                k = 0.6f + 0.4f * sinf(2 * PI * t * speed / 6.0f);
-            for (int y = 0; y < h; ++y) {
-                bool edge_row = y < size || y >= h - size;
-                for (int x = 0; x < w; ++x) {
-                    if (!edge_row && x == size) // skip the middle of the row
-                        x = w - size;
-                    int d = min(min(x, y), min(w - 1 - x, h - 1 - y));
-                    if (d >= size)
-                        continue;
-                    float a = 1.0f - (float)d / size;
-                    a = a * a * k;
-                    display.drawPixel(x, y, (uint8_t)(r * a), (uint8_t)(g * a), (uint8_t)(b * a));
-                }
-            }
-        }
-        else if (m_fx.get() == FX_SLIDE) {
-            float period = 12.0f / speed;
-            float ph = fmodf(t, period) / period;
-            float tri = ph < 0.5f ? ph * 2 : 2 - ph * 2;
-            float half = size / 2.0f;
-            float cx = -half + tri * (w + size);
-            for (int x = max(0, (int)(cx - half)); x <= min(w - 1, (int)(cx + half) + 1); ++x) {
-                float a = 1.0f - fabsf(x + 0.5f - cx) / half;
-                if (a <= 0)
+        for (int y = 0; y < h; ++y) {
+            bool edge_row = y < size || y >= h - size;
+            for (int x = 0; x < w; ++x) {
+                if (!edge_row && x == size) // skip the middle of the row
+                    x = w - size;
+                int d = min(min(x, y), min(w - 1 - x, h - 1 - y));
+                if (d >= size)
                     continue;
-                a = a * a;
-                uint8_t cr = r * a, cg = g * a, cb = b * a;
-                for (int y = 0; y < h; ++y)
-                    display.drawPixel(x, y, cr, cg, cb);
+                display.drawPixel(x, y, ring[d][0], ring[d][1], ring[d][2]);
             }
         }
     }
-};
-
-const int SPECIAL_PERIODS = 4;
-
-struct SpecialTimes : public PropHolder<SPECIAL_PERIODS>
-{
-    SpecialPeriod* m_periods[SPECIAL_PERIODS];
-
-    SpecialTimes(IPropHolder* parent)
-      : PropHolder(parent)
-    {
-        for (int i = 0; i < SPECIAL_PERIODS; ++i)
-            m_periods[i] = new SpecialPeriod(this, String("sp") + i);
+    else if (fx == FX_SLIDE) {
+        float period = 12.0f / speed;
+        float ph = fmodf(t, period) / period;
+        float tri = ph < 0.5f ? ph * 2 : 2 - ph * 2;
+        float half = size / 2.0f;
+        float cx = -half + tri * (w + size);
+        for (int x = max(0, (int)(cx - half)); x <= min(w - 1, (int)(cx + half) + 1); ++x) {
+            float a = 1.0f - fabsf(x + 0.5f - cx) / half;
+            if (a <= 0)
+                continue;
+            a = led_level(a * a);
+            uint8_t cr = r * a, cg = g * a, cb = b * a;
+            for (int y = 0; y < h; ++y)
+                display.drawPixel(x, y, cr, cg, cb);
+        }
     }
-
-    // the period at this minute of the day, -1 if none. the first one wins
-    int at(int minute) const {
-        for (int i = 0; i < SPECIAL_PERIODS; ++i)
-            if (m_periods[i]->active_at(minute))
-                return i;
-        return -1;
-    }
-};
-
+}
 
 // the clock for one orientation: the combined time and date lines, the separate fields and the background
 struct ClockLayout : public PropHolder<12>, public BasePanel
@@ -586,7 +529,7 @@ struct ClockLayout : public PropHolder<12>, public BasePanel
     FieldTextBlock m_month;
     FieldTextBlock m_year;
     Prop<uint16_t> m_back_color;
-    Prop<bool> m_show_sec;  // of the combined time
+    Prop<bool> m_show_sec;  // not used any more (the time is always h:mm:ss, ClockFace has h:mm), kept for the blob
     Prop<bool> m_show_day;  // of the combined date
 
     ClockLayout(IPropHolder* parent, const String& name, bool portrait)
@@ -631,7 +574,7 @@ struct ClockLayout : public PropHolder<12>, public BasePanel
         cur_date += "/";
         cur_date += year(local);
         m_date_text.set(cur_date);
-        m_time_text.set_time(hour(local), minute(local), second(local), m_show_sec.get());
+        m_time_text.set_time(hour(local), minute(local), second(local), true);
 
         m_hour.set_value(hour(local));
         m_min.set_value(minute(local));
@@ -642,25 +585,16 @@ struct ClockLayout : public PropHolder<12>, public BasePanel
         m_year.set_value(year(local));
     }
 
-    // in the order of the special colors
-    TextBlock* texts(int i) {
-        TextBlock* t[CLOCK_TEXTS] = { &m_time_text, &m_date_text, &m_hour, &m_min, &m_sec, &m_weekday, &m_day, &m_month, &m_year };
-        return t[i];
-    }
-
-    // sp is the special period to show, or null
-    void draw(time_t local, const SpecialPeriod* sp, float t)
+    void draw_back()
     {
         color888(m_back_color.get(), m_r, m_g, m_b);
         drawBack();
-        if (sp != nullptr)
-            sp->draw_effect(t);
-        for (int i = 0; i < CLOCK_TEXTS; ++i) {
-            texts(i)->m_color_override = sp ? sp->m_colors[i]->get() : -1;
-            texts(i)->m_outline_override = sp ? sp->m_outlines[i]->get() : -1;
-        }
+    }
+
+    void draw_texts(time_t local)
+    {
         // the text blocks set the drawer they need.
-        // each one by its own type, draw() isn't virtual so texts(i)->draw() would draw them all as plain text
+        // each one by its own type, draw() isn't virtual
         set_time(local);
         m_time_text.draw();
         m_date_text.draw();
@@ -674,69 +608,224 @@ struct ClockLayout : public PropHolder<12>, public BasePanel
     }
 };
 
-// the clock with a layout for landscape and one for portrait, and the special times
-struct ClockPanel : public PropHolder<4>
+// ---- clock faces and the periods of the day, same as in the web-ui (clock.js) ----
+// a face is everything about how the clock looks: both layouts and the background effect, with a name.
+// a panel without saved faces (new) shows the first face, with the defaults, all day.
+// the day is divided into periods, each shows one of the faces. a period starts at its start minute and lasts
+// until the next one starts, the last one goes on over midnight until the first one.
+// the faces are in CLOCK_FACES slots, each saved as one blob ("lf0".."lf7"), the periods in DAY_PERIODS slots
+// saved together in the blob "per": a key per prop would be too many for Preferences
+
+const int CLOCK_FACES = 8;
+const int DAY_PERIODS = 12;
+const int DAY_MINUTES = 24 * 60;
+
+// how a face shows the clock
+enum FaceMode {
+    FACE_NORMAL = 0,  // the layouts and the effect
+    FACE_OFF = 1,     // nothing lit, the panel is dark (also no mode icon)
+};
+
+// new props of a face (or a period) have to be added at the end, the blobs are in this order
+struct ClockFace : public BlobHolder<13>
 {
+    Prop<bool> m_on;
+    TextProp m_name;
     ClockLayout m_land;
     ClockLayout m_port;
-    Prop<int16_t> m_tz_offset;
-    SpecialTimes m_special;
-    int m_demo = -1;               // a special period shown for a while, from the web-ui
-    unsigned long m_demo_until = 0;
+    Prop<int16_t> m_fx;
+    Prop<uint16_t> m_fx_color;
+    Prop<int16_t> m_fx_size;  // thickness in pixels
+    Prop<int16_t> m_fx_speed; // 1-10
+    Prop<bool> m_fx_pulse;    // the border pulses
+    Prop<bool> m_wake;        // when its period starts the clock is shown, also when the display is off or in a game
+    Prop<int16_t> m_mode;     // FaceMode
+    // the time without seconds, of the landscape and the portrait layout. here and not in ClockLayout so that
+    // the blobs from before it still load: new props go at the end
+    TimeTextBlock m_hhmm_land;
+    TimeTextBlock m_hhmm_port;
 
-    ClockPanel(const String& land_name, const String& port_name, NamesIndex* name_index)
-      : PropHolder(name_index)
-      , m_land(this, land_name, false)
-      , m_port(this, port_name, true)
-      , m_tz_offset(this, "tz_offset", 3)
-      , m_special(this)
-    {
+    ClockFace(IPropHolder* parent, int slot)
+      : BlobHolder(parent, String("lf") + slot)
+      , m_on(this, m_key + "_on", false)
+      , m_name(this, m_key + "_name", (String("Face ") + (slot + 1)).c_str())
+      , m_land(this, m_key + "l", false)
+      , m_port(this, m_key + "p", true)
+      , m_fx(this, m_key + "_fx", FX_NONE)
+      , m_fx_color(this, m_key + "_fx_col", 0xF800)
+      , m_fx_size(this, m_key + "_fx_size", 8)
+      , m_fx_speed(this, m_key + "_fx_speed", 3)
+      , m_fx_pulse(this, m_key + "_fx_pulse", true)
+      , m_wake(this, m_key + "_wake", false)
+      , m_mode(this, m_key + "_mode", FACE_NORMAL)
+      , m_hhmm_land(this, m_key + "l_t3", false)
+      , m_hhmm_port(this, m_key + "p_t3", false)
+    {}
+
+    bool dark() const {
+        return m_mode.get() == FACE_OFF;
     }
+
+    bool animated() const {
+        return !dark() && (m_fx.get() == FX_SLIDE || (m_fx.get() == FX_BORDER && m_fx_pulse.get()));
+    }
+
+    void draw(time_t local, float t) {
+        if (dark()) {
+            display.clearDisplay();
+            return;
+        }
+        ClockLayout& l = display.is_portrait() ? m_port : m_land;
+        l.draw_back();
+        if (m_fx.get() != FX_NONE)
+            draw_effect(m_fx.get(), m_fx_color.get(), m_fx_size.get(), m_fx_speed.get(), m_fx_pulse.get(), t);
+        l.draw_texts(local);
+        TimeTextBlock& hhmm = display.is_portrait() ? m_hhmm_port : m_hhmm_land;
+        hhmm.set_time(hour(local), minute(local), second(local), false);
+        hhmm.draw();
+    }
+};
+
+struct DayPeriod : public PropHolder<3>
+{
+    Prop<bool> m_on;
+    Prop<int16_t> m_start;  // minute of the day
+    Prop<int16_t> m_face;   // the slot of its face
+
+    DayPeriod(IPropHolder* parent, int slot)
+      : PropHolder(parent)
+      , m_on(this, String("per") + slot + "_on", false)
+      , m_start(this, String("per") + slot + "_start", 0)
+      , m_face(this, String("per") + slot + "_face", 0)
+    {}
+};
+
+struct DayPeriods : public BlobHolder<DAY_PERIODS>
+{
+    DayPeriod* m_periods[DAY_PERIODS];
+
+    DayPeriods(IPropHolder* parent)
+      : BlobHolder(parent, "per")
+    {
+        for (int i = 0; i < DAY_PERIODS; ++i)
+            m_periods[i] = new DayPeriod(this, i);
+    }
+};
+
+// the clock faces and the periods of the day
+struct ClockPanel : public PropHolder<1 + CLOCK_FACES + 1>
+{
+    static const unsigned long SIMULATE_MS = 30000;
+
+    Prop<int16_t> m_tz_offset;
+    ClockFace* m_faces[CLOCK_FACES];
+    DayPeriods m_day;
+    // "Show on panel" in the web-ui: the clock is shown as if it's this minute of the day, -1 is the real time.
+    // only for SIMULATE_MS after it was set, the web-ui sends it again while it's on, it ends if the page is closed
+    int m_sim_minute = -1;
+    unsigned long m_sim_set = 0;
+
+    ClockPanel(NamesIndex* name_index)
+      : PropHolder(name_index)
+      , m_tz_offset(this, "tz_offset", 3)
+      , m_day(this)
+    {
+        // registered after m_day: the order of the props here doesn't matter, every face and the periods are
+        // separate blobs
+        for (int i = 0; i < CLOCK_FACES; ++i)
+            m_faces[i] = new ClockFace(this, i);
+    }
+
+    DayPeriod* period(int slot) { return m_day.m_periods[slot]; }
 
     time_t local_time(time_t utcTime) const {
         return utcTime + m_tz_offset.get() * 3600;
     }
 
-    // the special period shown now, -1 if none
-    int special_now(time_t utcTime) {
-        if (m_demo >= 0) {
-            if ((long)(millis() - m_demo_until) < 0)
-                return m_demo;
-            m_demo = -1;
-        }
+    // minute of the day, -1 stops
+    void simulate(int minute) {
+        m_sim_minute = (minute >= 0 && minute < DAY_MINUTES) ? minute : -1;
+        m_sim_set = millis();
+    }
+    bool simulating() {
+        if (m_sim_minute >= 0 && millis() - m_sim_set >= SIMULATE_MS)
+            m_sim_minute = -1;
+        return m_sim_minute >= 0;
+    }
+
+    // the local time the clock shows: the simulated minute today, with the real seconds
+    time_t shown_time(time_t utcTime) {
         time_t local = local_time(utcTime);
-        return m_special.at(hour(local) * 60 + minute(local));
+        if (!simulating())
+            return local;
+        return local - (hour(local) * 60 + minute(local)) * 60 + m_sim_minute * 60;
     }
 
-    void demo(int period, unsigned long ms) {
-        m_demo = (period >= 0 && period < SPECIAL_PERIODS) ? period : -1;
-        m_demo_until = millis() + ms;
+    // the period at a minute of the day: the last one that started, before the first is the last one of the
+    // day before. -1 if there are no periods
+    int period_at(int minute) {
+        int last = -1, cur = -1;
+        for (int i = 0; i < DAY_PERIODS; ++i) {
+            DayPeriod* p = period(i);
+            if (!p->m_on.get())
+                continue;
+            if (last < 0 || p->m_start.get() > period(last)->m_start.get())
+                last = i;
+            if (p->m_start.get() <= minute && (cur < 0 || p->m_start.get() > period(cur)->m_start.get()))
+                cur = i;
+        }
+        return cur >= 0 ? cur : last;
     }
 
-    void draw(time_t utcTime)
-    {
-        int sp = special_now(utcTime);
-        (display.is_portrait() ? m_port : m_land).draw(local_time(utcTime), sp >= 0 ? m_special.m_periods[sp] : nullptr, millis() / 1000.0f);
+    // the period the clock shows now, also the simulated time
+    int period_now(time_t utcTime) {
+        time_t local = shown_time(utcTime);
+        return period_at(hour(local) * 60 + minute(local));
+    }
+
+    // the face of a period. a face that was deleted (or no period) is the first face
+    ClockFace* face_of(int period_slot) {
+        if (period_slot >= 0) {
+            int f = period(period_slot)->m_face.get();
+            if (f >= 0 && f < CLOCK_FACES && m_faces[f]->m_on.get())
+                return m_faces[f];
+        }
+        for (int i = 0; i < CLOCK_FACES; ++i)
+            if (m_faces[i]->m_on.get())
+                return m_faces[i];
+        return m_faces[0];
+    }
+
+    // the period now if its face takes over the display when it starts, else -1. the real time, not simulated
+    int wake_period(time_t utcTime) {
+        time_t local = local_time(utcTime);
+        int p = period_at(hour(local) * 60 + minute(local));
+        return (p >= 0 && face_of(p)->m_wake.get()) ? p : -1;
+    }
+
+    void draw(time_t utcTime) {
+        face_of(period_now(utcTime))->draw(shown_time(utcTime), millis() / 1000.0f);
     }
 };
+
 
 class ClockState : public IScreen
 {
 public:
     static const unsigned long ANIM_MS = 40; // ~25 frames per second for the moving effects
-    static const unsigned long DEMO_MS = 30000;
 
     ClockPanel m_panel;
     Preferences m_pref;
     unsigned long m_epoch_time = 0;
 
 private:
-    int m_drawn_special = -2;
+    int m_drawn_period = -2;
+    ClockFace* m_drawn_face = nullptr;
     unsigned long m_last_anim = 0;
 
 public:
     ClockState(NamesIndex* prop_map)
-       : m_panel("p0", "cp", prop_map)
+       : m_panel(prop_map)
     {
     }
 
@@ -755,25 +844,27 @@ public:
         m_panel.toJson(obj);
     }
 
-    // shows a special period for a while, -1 stops
-    void demo(int period) {
-        m_panel.demo(period, DEMO_MS);
-    }
-
     // called in loop, returns true if need to draw besides the change of the time:
-    // a special period started or ended, or its effect moves
+    // another period or face, or its effect moves
     bool update() {
-        int sp = m_panel.special_now(m_epoch_time);
-        if (sp != m_drawn_special)
+        int p = m_panel.period_now(m_epoch_time);
+        ClockFace* f = m_panel.face_of(p);
+        if (p != m_drawn_period || f != m_drawn_face)
             return true;
-        if (sp >= 0 && m_panel.m_special.m_periods[sp]->animated() && millis() - m_last_anim >= ANIM_MS)
+        if (f->animated() && millis() - m_last_anim >= ANIM_MS)
             return true;
         return false;
     }
 
+    // the face now shows nothing, also no mode icon
+    bool dark() {
+        return m_panel.face_of(m_panel.period_now(m_epoch_time))->dark();
+    }
+
     void draw() override
     {
-        m_drawn_special = m_panel.special_now(m_epoch_time);
+        m_drawn_period = m_panel.period_now(m_epoch_time);
+        m_drawn_face = m_panel.face_of(m_drawn_period);
         m_last_anim = millis();
         m_panel.draw(m_epoch_time);
     }

@@ -17,11 +17,28 @@ public:
             Serial.println("accelerometer not found, orientation is fixed");
             return false;
         }
-        m_accel.setRange(LIS3DH_RANGE_2_G);
+        m_accel.setRange(LIS3DH_RANGE_4_G); // like the pixel dust demo, so shaking the panel registers
         return true;
     }
 
     int rotation() const { return m_rotation; }
+    // a reading now, m/s^2 (for the sand game, every frame). false if there's no accelerometer
+    bool read(float& x, float& y, float& z) {
+        if (!m_ok)
+            return false;
+        sensors_event_t e;
+        m_accel.getEvent(&e);
+        x = m_ax = e.acceleration.x;
+        y = m_ay = e.acceleration.y;
+        z = m_az = e.acceleration.z;
+        return true;
+    }
+
+    // the last raw reading, m/s^2
+    bool found() const { return m_ok; }
+    float ax() const { return m_ax; }
+    float ay() const { return m_ay; }
+    float az() const { return m_az; }
 
     // called in loop, returns true if the rotation changed
     bool update() {
@@ -30,6 +47,9 @@ public:
         m_last_sample = millis();
         sensors_event_t e;
         m_accel.getEvent(&e);
+        m_ax = e.acceleration.x;
+        m_ay = e.acceleration.y;
+        m_az = e.acceleration.z;
         int r = rotation_of(e.acceleration.x, e.acceleration.y);
         if (r < 0 || r == m_rotation) {
             m_candidate = -1;
@@ -72,4 +92,5 @@ private:
     int m_candidate = -1;
     int m_count = 0;
     unsigned long m_last_sample = 0;
+    float m_ax = 0, m_ay = 0, m_az = 0;
 };

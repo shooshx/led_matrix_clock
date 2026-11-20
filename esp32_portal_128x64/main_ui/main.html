@@ -3,12 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=overlays-content">
-<meta name="apple-mobile-web-app-capable" content="yes"> 
+<meta name="apple-mobile-web-app-capable" content="yes">
+<!-- the clock mode icon of the panel (icon_clock in ModeIcons.h), in the page so it's not another request -->
+<link rel="icon" type="image/svg+xml" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8" shape-rendering="crispEdges"><path fill="%230096FF" d="M2 0h4v1h-4zM1 1h1v1h-1zM6 1h1v1h-1zM0 2h1v1h-1zM3 2h1v1h-1zM7 2h1v1h-1zM0 3h1v1h-1zM3 3h1v1h-1zM7 3h1v1h-1zM0 4h1v1h-1zM3 4h3v1h-3zM7 4h1v1h-1zM0 5h1v1h-1zM7 5h1v1h-1zM1 6h1v1h-1zM6 6h1v1h-1zM2 7h4v1h-4z"/></svg>'>
+<!-- the biggest file, from the start instead of when asm_gfx.js runs after all the scripts.
+     "crossorigin" so it matches the fetch of asm_gfx.js (cors, same-origin credentials) and isn't loaded twice -->
+<link rel="preload" href="asm_gfx.wasm" as="fetch" type="application/wasm" crossorigin>
 <script src="base_utils.js"></script>
 <script src="ColorPicker.js"></script>
 <script src="pixel_draw.js"></script>
 <script src="clock.js"></script>
 <script src="prefs.js"></script>
+<script src="audio.js"></script>
 <script>
 
 
@@ -17,15 +23,45 @@ const DISCONNECTED = 0
 const CONNECTING = 1
 const CONNECTED = 2
 
+// pref updates ("U ...", "UT ...") sent together in one message, a line each, up to about this size.
+// hundreds of separate small messages (a clock face copied, prefs uploaded) were sometimes lost on the panel
+const UPDATES_BATCH_MAX = 1000
+
 class WsWrap {
     constructor() {
         this.ws = null
         this.state = DISCONNECTED
         this.send_q = []
+        this.batch = null  // pref updates not sent yet, sent at the end of this js turn
     }
-    send(v) 
+    send(v)
     {
-        if (this.state != CONNECTED) {
+        if (typeof v == 'string' && v.startsWith('U')) {
+            if (this.batch !== null && this.batch.length + 1 + v.length > UPDATES_BATCH_MAX)
+                this.flush()
+            if (this.batch === null) {
+                this.batch = v
+                window.setTimeout(()=>{ this.flush() }, 0)
+            }
+            else
+                this.batch += '\n' + v
+            return
+        }
+        this.flush()  // what came before it first
+        this.send_now(v)
+    }
+    flush()
+    {
+        if (this.batch === null)
+            return
+        const b = this.batch
+        this.batch = null
+        this.send_now(b)
+    }
+    send_now(v)
+    {
+        // also while it's closing: the browser drops what's sent then without saying, it's sent after reconnecting
+        if (this.state != CONNECTED || this.ws.readyState != WebSocket.OPEN) {
             this.send_q.push(v)
             if (this.state == DISCONNECTED)
                 this.connect()
@@ -37,18 +73,6 @@ class WsWrap {
         catch(e) {
             console.log(e)
         }
-    }
-
-    // calls cb once everything sent so far has left the browser
-    when_sent(cb)
-    {
-        const check = ()=>{
-            if (this.state == CONNECTED && this.send_q.length == 0 && this.ws.bufferedAmount == 0)
-                cb()
-            else
-                window.setTimeout(check, 100)
-        }
-        check()
     }
 
     connect()
@@ -75,7 +99,7 @@ class WsWrap {
                 const sq = this.send_q
                 this.send_q = []
                 for(let msg of sq)
-                    this.send(msg)
+                    this.send_now(msg)
             }
         })
 
@@ -92,6 +116,8 @@ class WsWrap {
             console.log("WS close:", e, " a ", e.code, " b ", JSON.stringify(e))
             this.ws.close()
             this.state = DISCONNECTED
+            if (this.send_q.length > 0)  // what waited while it was closing
+                this.connect()
         })
 
     }
@@ -119,6 +145,7 @@ function create_section(parent, text, active_section, send_update)
         e.style.display = 'initial'
         header.setAttribute('selected', true)
         send_update('active_section', my_index)
+        e.dispatchEvent(new Event('section_shown'))  // for what lost the focus when it was hidden
     })
     e.style.display = init_vis ? 'initial' : 'none'
     header.setAttribute('selected', init_vis)
@@ -181,8 +208,9 @@ function create_ui(prefJson)
     const portrait = ((prefJson['rotation'] || 0) & 1) != 0
     const px_width = portrait ? PX_SHORT : PX_LONG
     const px_height = portrait ? PX_LONG : PX_SHORT
+    // a text pref (the names of the clock faces) is "UT name text", the text to the end of the line
     const send_update = (name, value)=>{
-        const cmd = "U " + name + " " + value
+        const cmd = (typeof value == 'string' ? "UT " : "U ") + name + " " + value
         ws_wrap.send(cmd)
     }
     const send_off_update = (name, value)=>{
@@ -214,20 +242,33 @@ function create_ui(prefJson)
     // not a panel section, opening it only refreshes the shown prefs instead of changing active_section
     let prefs_refresh = null
     const prefs_e = create_section(body, 'Prefs', active_section, ()=>{ prefs_refresh() })
-    prefs_refresh = prefs_create(prefs_e, send_update, (cb)=>{ ws_wrap.when_sent(cb) })
+    prefs_refresh = prefs_create(prefs_e, prefJson)
+
+    // not a panel section either, opening it doesn't change what the panel shows
+    const audio_e = create_section(body, 'Audio', active_section, ()=>{})
+    audio_create(audio_e, ws_wrap)
 
     add_glob_prop_ui(body, prefJson, send_update)
 }
 
+// the prefs are downloaded while the wasm loads, the ui is made when both are there
+let g_pref_json = null
+let g_wasm_ready = false
+function try_create_ui()
+{
+    if (g_pref_json !== null && g_wasm_ready)
+        create_ui(g_pref_json)
+}
+download("/pref?t=" + new Date().getTime(), (resText)=>{
+    g_pref_json = JSON.parse(resText)
+    try_create_ui()
+})
+
 function rt_start()
 {
     ws_wrap.connect()
-
-    download("/pref?t=" + new Date().getTime(), (resText)=>{
-        const prefJson = JSON.parse(resText)       
-        create_ui(prefJson)
-    })
-    
+    g_wasm_ready = true
+    try_create_ui()
 }
 
 // wasm finish loadin will call this

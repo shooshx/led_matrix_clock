@@ -177,6 +177,7 @@ function add_btn(parent, text, cb)
     const btn = add_div(parent, 'tm_btn')
     btn.innerText = text
     btn.addEventListener('click', cb)
+    return btn
 }
 
 
@@ -655,6 +656,7 @@ class Layout
             it.chip = chip
         }
         this.editor = add_div(ctrl, 'lt_editor')
+        this.selected = null  // made again (clock faces), select() has to make the editor
         this.select(this.items.find((it)=>it.block.show.v) || this.items[0])
     }
 
@@ -718,6 +720,37 @@ class Layout
                 tracker.cur = null
         }
     }
+}
+
+// many prefs at once to the panel (or the py_server): an object of {name: value}, nested or not, like the json
+// of GET /pref. one request, not hundreds of websocket updates. cb(answer) with {applied, unknown:[], bad:[]},
+// err_cb(message) if it failed
+function post_prefs(prefs, cb, err_cb=null)
+{
+    const req = new XMLHttpRequest()
+    const fail = (msg)=>{
+        console.error("POST /pref: " + msg)
+        if (err_cb !== null)
+            err_cb(msg)
+    }
+    req.addEventListener("load", function() {
+        if (this.status == 200) {
+            try {
+                cb(JSON.parse(this.responseText))
+            }
+            catch(e) {
+                fail("bad answer " + this.responseText)
+            }
+            return
+        }
+        fail("status " + this.status + " " + this.responseText)
+    })
+    req.addEventListener("error", function() {
+        fail("no response")
+    })
+    req.open("POST", "/pref")
+    req.setRequestHeader("Content-Type", "application/json")
+    req.send(JSON.stringify(prefs))
 }
 
 // cb(text) with the response, err_cb(message) if it failed

@@ -1,5 +1,3 @@
-#include <iostream>
-#include <sstream>
 
 #include <emscripten.h>
 #include <emscripten/bind.h>
@@ -156,9 +154,8 @@ std::vector<std::string> gfx_get_fonts()
     for(int i = 0; i < (sizeof(all_fonts) / sizeof(FontDef)); ++i)
     {
         const auto& f = all_fonts[i];
-        std::stringstream ss;
-        ss << f.familyName << " " << f.fontSize;
-        lst.push_back(ss.str());
+        // not a stringstream: that pulls the C++ streams into the wasm, 40K more gzipped
+        lst.push_back(std::string(f.familyName) + " " + std::to_string(f.fontSize));
     }
     return lst;
 }

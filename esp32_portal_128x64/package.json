@@ -1,0 +1,8 @@
+{
+  "name": "clock-web-ui-tools",
+  "private": true,
+  "description": "tools for building the web UI into the LittleFS image, see clock_128/gzip_web.py",
+  "devDependencies": {
+    "terser": "^5.51.2"
+  }
+}

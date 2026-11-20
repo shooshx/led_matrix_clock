@@ -76,13 +76,16 @@ public:
     static const int W = DISPLAY_WIDTH;
     static const int H = DISPLAY_HEIGHT;
 
-    // called from the web server task
+    // called from the web server task. changed() after all the pixels of a command, so that the loop doesn't
+    // draw an image that's half new
     void set_pixel(int x, int y, uint16_t c) {
         if (x < 0 || y < 0 || x >= display.width() || y >= display.height())
             return;
         int16_t px = x, py = y;
         display.to_physical(px, py);
         m_img[py][px] = c;
+    }
+    void changed() {
         m_need_draw = true;
     }
 

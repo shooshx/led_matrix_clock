@@ -26,6 +26,7 @@ class DrawState extends GfxCanvas
         this.overlay_cb = null    // draws over the canvas, for the text cursor
         this.text_tool = null
         this.on_clear = null
+        this.eraser = false       // the brush erases, see erase()
         
         //for(let i = 0; i < this.pixels.length; ++i)
         //    this.pixels[i] = 0
@@ -168,8 +169,25 @@ class DrawState extends GfxCanvas
             this.overlay_cb(this.ctx)
     }
 
+    // the eraser: a square as wide as the brush, hard edges, black. at least the pixel under it
+    erase(x, y)
+    {
+        const r = this.tool_radius
+        const x1 = Math.floor(x - r), x2 = Math.ceil(x + r)
+        const y1 = Math.floor(y - r), y2 = Math.ceil(y + r)
+        for (let ix = x1; ix <= x2; ++ix)
+            for (let iy = y1; iy <= y2; ++iy)
+                if (Math.abs(x - ix - 0.5) < r && Math.abs(y - iy - 0.5) < r)
+                    this.setPixel(ix, iy, 0, 0, 0)
+        this.setPixel(Math.trunc(x), Math.trunc(y), 0, 0, 0)
+    }
+
     brush(x, y)
     {
+        if (this.eraser) {
+            this.erase(x, y)
+            return
+        }
         if (this.tool_radius == 0) {
             const ix = Math.trunc(x), iy = Math.trunc(y)
             this.setPixel(ix, iy, this.tool_color.r, this.tool_color.g, this.tool_color.b)
@@ -227,8 +245,12 @@ class DrawState extends GfxCanvas
     show_tool(px, py) {
         this.ctx.beginPath();
         const r = (this.tool_pradius == 0) ? (0.5 * this.PIXEL_SIZE) : this.tool_pradius
-        this.ctx.moveTo(px + r, py)
-        this.ctx.arc(px, py, r, 0, 2*Math.PI);
+        if (this.eraser)
+            this.ctx.rect(px - r, py - r, 2 * r, 2 * r)
+        else {
+            this.ctx.moveTo(px + r, py)
+            this.ctx.arc(px, py, r, 0, 2*Math.PI);
+        }
         this.ctx.strokeStyle = '#666666'
         this.ctx.stroke()
     }
@@ -254,6 +276,13 @@ function connect_events(canvas, s)
         const dx = (x - prev_x), dy = (y - prev_y)
         const d = Math.sqrt(dx*dx + dy*dy)
         const step_pass = (d > STEP_SIZE_FACTOR * s.tool_radius)
+        // the mouse events come as they come (fewer when the page is busy), the line between them is filled with
+        // stamps as far apart as when moving slowly, so that it doesn't break into dashes
+        if ((isDown || isTouch) && step_pass && prev_x !== null) {
+            const n = Math.floor(d / Math.max(STEP_SIZE_FACTOR * s.tool_radius, 0.5))
+            for (let i = 1; i < n; ++i)
+                s.brush(prev_x + dx * i / n, prev_y + dy * i / n)
+        }
         s.tool(x, y, px, py, step_pass, isDown || isTouch);
         if (step_pass)
         {
@@ -292,6 +321,9 @@ function connect_events(canvas, s)
         if (s.text_tool !== null && s.text_tool.active)
             return
         call_tool(e);
+        // coming back in elsewhere doesn't connect to where it left
+        prev_x = null
+        prev_y = null
     })
 
 
@@ -410,6 +442,23 @@ function draw_pixel_create(root, w, h, ws)
 
     add_slider(control_elem, 'draw_size_in', 0, 50, s.tool_radius * 10, (v)=>{
         s.set_tool_size(v/10)
+    })
+
+    // the eraser instead of the brush, the same size. it's for the brush: it turns the text tool off
+    const er_cont = add_div(control_elem, 'draw_live')
+    const er_in = add_elem(er_cont, 'input', 'in_checkbox')
+    er_in.setAttribute('type', 'checkbox')
+    const er_lbl = add_elem(er_cont, 'label', 'in_check_label')
+    er_lbl.innerText = 'Eraser'
+    const er_id = 'check_' + running_id++
+    er_in.setAttribute('id', er_id)
+    er_lbl.setAttribute('for', er_id)
+    er_in.addEventListener('change', ()=>{
+        s.eraser = er_in.checked
+        if (s.eraser && s.text_tool.active) {
+            s.text_tool.active_in.checked = false
+            s.text_tool.set_active(false)
+        }
     })
 
     s.text_tool = new TextTool(top_elem, control_elem, s, picker)
@@ -565,8 +614,8 @@ function add_full_screen(top_elem, control_elem, canvas)
 // Free text in the draw tab. the texts are drawn as pixels on top of the brush drawing and sent to the panel
 // like the brush, but the web-ui remembers them so that they can be selected again, edited and moved
 // (until the page is reloaded). with Text checked, pressing the canvas selects the text there or starts
-// a new one where pressed, dragging a text moves it. a hidden input does the typing so that phones show
-// their keyboard and the arrow keys move in the text.
+// a new one where pressed, dragging a text moves it. a hidden textarea does the typing so that phones show
+// their keyboard and the arrow keys move in the text. Enter goes down a line, Esc ends editing.
 class TextTool
 {
     constructor(top_elem, control_elem, s, picker)
@@ -593,7 +642,7 @@ class TextTool
         this.gfx.set_drawer(this.drawer)
 
         const line = add_div(control_elem, 'draw_text_ctrl')
-        this.make_check(line, "Text", (v)=>{ this.set_active(v) })
+        this.active_in = this.make_check(line, "Text", (v)=>{ this.set_active(v) })
         this.font_sel = add_select(line, null, font_opts(), this.font, (v)=>{
             this.font = parseInt(v)
             if (this.selected !== null) {
@@ -609,8 +658,8 @@ class TextTool
             }
         })
 
-        this.input = add_elem(top_elem, 'input', 'draw_text_input')
-        this.input.setAttribute('type', 'text')
+        this.input = add_elem(top_elem, 'textarea', 'draw_text_input')
+        this.input.setAttribute('rows', '1')
         this.input.setAttribute('autocomplete', 'off')
         this.input.setAttribute('spellcheck', 'false')
         this.input.addEventListener('input', ()=>{
@@ -623,11 +672,21 @@ class TextTool
         for (const ev of ['keyup', 'select', 'click'])
             this.input.addEventListener(ev, ()=>{ this.show_cursor() })
         this.input.addEventListener('keydown', (e)=>{
-            if (e.key == 'Escape' || e.key == 'Enter') {
+            if (e.key == 'Escape') {  // Enter is a new line
                 this.select(null)
                 this.input.blur()
             }
         })
+
+        // hiding the draw tab takes the focus from the input, back in it the selected text gets the typing again
+        const section = top_elem.closest('.section_elem')
+        if (section !== null)
+            section.addEventListener('section_shown', ()=>{
+                if (this.active && this.selected !== null) {
+                    this.input.focus()
+                    this.show_cursor()
+                }
+            })
 
         s.overlay_cb = (ctx)=>{ this.draw_overlay(ctx) }
         s.on_clear = ()=>{
@@ -687,12 +746,16 @@ class TextTool
     }
 
     render(el, m) {
+        // before setting the target: the first time for a font, measuring the line renders a probe text
+        const lines = el.text.split('\n')
+        const lh = lines.length > 1 ? this.line_height(el) : 0
         this.target = m
         this.target_el = el
         el.bbox = null
         this.set_font(el)
         this.gfx.set_text_color(el.color.r, el.color.g, el.color.b)
-        this.gfx.print_str_at(el.x, el.y, el.text, ALIGN_LEFT)
+        for (let i = 0; i < lines.length; ++i)
+            this.gfx.print_str_at(el.x, el.y + i * lh, lines[i], ALIGN_LEFT)
         this.target = null
         this.target_el = null
     }
@@ -717,6 +780,12 @@ class TextTool
             this.extents[key] = (b === null) ? {top:0, bottom:7} : {top:b.y0 - y, bottom:b.y1 - y}
         }
         return this.extents[key]
+    }
+
+    // from one line of a text to the next: its height ("Ay") and a pixel between the lines
+    line_height(el) {
+        const ext = this.line_extent(el)
+        return ext.bottom - ext.top + 2
     }
 
     // the text at panel pixel (x, y), the top one
@@ -838,9 +907,13 @@ class TextTool
             return
         const idx = (document.activeElement === this.input && this.input.selectionStart !== null) ? this.input.selectionStart : el.text.length
         this.set_font(el)
-        const cx = el.x + this.gfx.calc_str_width(el.text.slice(0, idx))
+        // the line of the cursor and where in it
+        const before = el.text.slice(0, idx).split('\n')
+        const row = before.length - 1
+        const cx = el.x + this.gfx.calc_str_width(before[row])
+        const cy = el.y + row * this.line_height(el)
         const ext = this.line_extent(el)
         ctx.fillStyle = '#ffffff'
-        ctx.fillRect(cx * sx - 1, (el.y + ext.top) * sy, 3, (ext.bottom - ext.top + 1) * sy)
+        ctx.fillRect(cx * sx - 1, (cy + ext.top) * sy, 3, (ext.bottom - ext.top + 1) * sy)
     }
 }
