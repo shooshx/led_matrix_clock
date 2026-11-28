@@ -535,6 +535,10 @@ body {
     width: 150px;
     vertical-align: middle;
 }
+.cf_angle {
+    width: 120px;
+    vertical-align: middle;
+}
 .cf_pulse {
     display: inline-block;
     margin-left: 10px;
@@ -605,4 +609,65 @@ body {
 .mirror_note {
     font-size: 13px;
     color: #666666;
+}
+
+/* how often a random face changes */
+.cf_rnd_n {
+    width: 70px;
+    height: 25px;
+    font-size: 16px;
+    margin-right: 4px;
+}
+.audio_sound_sel {
+    margin-right: 8px;
+}
+.cf_sub {
+    border: solid 1px #888;
+    border-radius: 6px;
+    padding: 6px 8px;
+}
+.cf_sub.cf_sub_closed {
+    border-color: transparent;
+    padding: 0;
+}
+.cf_sub_body {
+    margin-top: 6px;
+}
+.cf_snd_list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0 8px 0;
+}
+.cf_snd_chip {
+    display: inline-block;
+    border: solid 1px #888;
+    border-radius: 12px;
+    padding: 1px 4px 1px 10px;
+}
+.cf_snd_remove {
+    cursor: pointer;
+    margin-left: 6px;
+    padding: 0 4px;
+    font-weight: bold;
+}
+.cf_snd_remove:hover {
+    color: #d33;
+}
+.cf_week_day {
+    display: inline-block;
+    margin: 0 10px 4px 0;
+    white-space: nowrap;
+}
+.load_error {
+    background-color: #ffe0e0;
+    border: solid 1px #c03030;
+    border-radius: 6px;
+    color: #800000;
+    padding: 8px 12px;
+    margin: 8px 0;
+    font-size: 15px;
+}
+.load_error button {
+    margin-left: 10px;
 }

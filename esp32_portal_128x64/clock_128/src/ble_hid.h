@@ -39,8 +39,40 @@ struct HidEvent {
     int16_t dx = 0, dy = 0; // MOVE, relative
 };
 
-// starts BLE and a background task that scans, connects and reconnects to the first HID device found
+// starts BLE and a background task that scans, connects and reconnects.
+// several devices can be connected at the same time. the bonded (paired) ones are reconnected; while none is
+// connected the first HID device found is taken too, so that a first device works without pairing mode
 void ble_hid_begin();
+
+// ---- pairing mode, for the admin view ----
+// while it's on the scan runs all the time and lists what it finds (and logs all of it to the serial),
+// nothing new is connected by itself, only by ble_hid_pair(). the connected devices stay connected
+
+struct BleFoundDevice {
+    char name[32];   // empty if it doesn't advertise one
+    char addr[18];
+    int rssi;
+    bool hid;        // advertises the HID service or a keyboard / mouse / remote appearance
+    bool bonded;
+    bool connected;
+};
+
+void ble_hid_pairing(bool on);
+bool ble_hid_pairing_active();
+
+// the devices found since pairing mode started that have a name or are HID, the HID ones first.
+// returns how many were put in out
+int ble_hid_found(BleFoundDevice* out, int max);
+
+// connects to and bonds with a found device, by its addr. an old bond with it is deleted first,
+// so that a device that forgot the bond pairs from scratch
+void ble_hid_pair(const char* addr);
+
+// what pairing is doing or how it ended, for the screen
+const char* ble_hid_pair_status();
+
+// the passkey a keyboard may ask to have typed on it
+uint32_t ble_hid_passkey();
 
 // gets the next input event, call from loop(). returns false if there's none
 bool ble_hid_poll(HidEvent& ev);
@@ -49,7 +81,7 @@ bool ble_hid_poll(HidEvent& ev);
 // count changes with every new one, pressed says if it was pressed or released
 const char* ble_hid_last_key(uint32_t* count = nullptr, bool* pressed = nullptr);
 
-// the name of the connected device, empty when none is connected
+// the names of the connected devices, comma separated, empty when none is connected
 const char* ble_hid_device();
 
 // caps lock state, the typed chars (HidEvent::ch) already take it into account

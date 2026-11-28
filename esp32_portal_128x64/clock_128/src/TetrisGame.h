@@ -28,6 +28,7 @@ class TetrisGame : public Game
 {
 public:
     const char* name() const override { return "Tetris"; }
+    bool uses_volume_keys() const override { return true; }  // rotate
     const Sprite& icon() const override { return tetris_art::S_ICON; }
     bool portrait() const override { return true; }
     uint32_t high_score() const override { return m_hi; }

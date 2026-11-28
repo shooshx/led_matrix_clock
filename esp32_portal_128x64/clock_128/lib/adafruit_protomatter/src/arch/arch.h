@@ -165,7 +165,15 @@ _PM_CUSTOM_BLAST             If defined, instructs core code to not compile
 
 #include <Arduino.h> // Pull in all that stuff.
 
+#if defined(ESP32)
+// clock_128 patch: the ROM's busy wait. delayMicroseconds() is in flash (and reads the time with more flash code),
+// in the row ISR a cache miss stretched the "1 us" waits and so the rows' lit times: the panel flickered while the
+// main code kept the flash / PSRAM cache busy
+#include <esp_rom_sys.h>
+#define _PM_delayMicroseconds(us) esp_rom_delay_us(us)
+#else
 #define _PM_delayMicroseconds(us) delayMicroseconds(us)
+#endif
 #define _PM_pinOutput(pin) pinMode(pin, OUTPUT)
 #define _PM_pinInput(pin) pinMode(pin, INPUT)
 #define _PM_pinHigh(pin) digitalWrite(pin, HIGH)

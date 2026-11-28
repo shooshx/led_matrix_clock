@@ -5,6 +5,8 @@
 #   in a row are joined and minified together with terser (if it's installed, npm install in
 #   esp32_portal_128x64), asm_gfx.js is put in as it is (emscripten minified it), the stylesheets as <style>
 # - everything is gzipped: the web server sends file.gz for file, compressed
+# - the sounds: ../sounds/convert_sounds.py makes mono mp3s of them in ../sounds/mp3, they go in as /sounds,
+#   not gzipped (the firmware plays them from there)
 # the files that went into main.html aren't uploaded. other files of main_ui that the page could load
 # (.html .js .css .wasm) are gzipped as they are. pref.current / pref.dummy of the py_server aren't taken
 import gzip
@@ -141,8 +143,39 @@ for name in sources:
 with open(mode_file, "w") as f:
     f.write(mode)
 
+# the sounds, in their own folder
+SOUNDS_DIR = "sounds"
+wanted.add(SOUNDS_DIR)
+sounds_src = os.path.normpath(os.path.join(proj, "..", "sounds"))
+sounds_out = os.path.join(out_dir, SOUNDS_DIR)
+os.makedirs(sounds_out, exist_ok=True)
+mp3_dir = os.path.join(sounds_src, "mp3")
+if os.path.exists(os.path.join(sounds_src, "convert_sounds.py")):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("convert_sounds", os.path.join(sounds_src, "convert_sounds.py"))
+    convert_sounds = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(convert_sounds)
+    try:
+        mp3_dir = convert_sounds.convert()
+    except Exception as e:
+        print("sounds: not converted, %s. the mp3s there already are used" % e)
+mp3s = sorted(f for f in os.listdir(mp3_dir) if f.lower().endswith(".mp3")) if os.path.isdir(mp3_dir) else []
+for name in mp3s:
+    src = os.path.join(mp3_dir, name)
+    dst = os.path.join(sounds_out, name)
+    if not os.path.exists(dst) or os.path.getmtime(dst) < os.path.getmtime(src):
+        shutil.copy2(src, dst)
+for name in os.listdir(sounds_out):
+    if name not in mp3s:
+        os.remove(os.path.join(sounds_out, name))
+        print("web_data: removed sounds/" + name)
+
 # files that aren't needed any more
 for name in os.listdir(out_dir):
     if name not in wanted:
-        os.remove(os.path.join(out_dir, name))
+        path = os.path.join(out_dir, name)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
         print("web_data: removed " + name)

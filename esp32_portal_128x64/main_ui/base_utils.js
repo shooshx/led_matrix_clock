@@ -170,6 +170,7 @@ function add_checkbox_input(parent, label, init_val, cb, cls=null)
 
     inp.checked = init_val
     inp.addEventListener('change', ()=>{ cb(inp.checked ? 1 : 0) })
+    return inp
 }
 
 function add_btn(parent, text, cb) 
@@ -640,14 +641,17 @@ class Layout
         const list = add_div(ctrl, 'lt_list')
         for (const it of this.items) {
             const chip = add_div(list, 'lt_chip')
-            const show = add_elem(chip, 'input', 'lt_chip_show')
-            show.setAttribute('type', 'checkbox')
-            show.setAttribute('title', 'Show')
-            show.checked = it.block.show.v != 0
-            show.addEventListener('change', ()=>{
-                it.block.show.set_and_update(show.checked ? 1 : 0, pref_update)
-                display_cb()
-            })
+            // a fixed block (the clock icon) is always shown, no checkbox
+            const show = it.block.fixed ? null : add_elem(chip, 'input', 'lt_chip_show')
+            if (show !== null) {
+                show.setAttribute('type', 'checkbox')
+                show.setAttribute('title', 'Show')
+                show.checked = it.block.show.v != 0
+                show.addEventListener('change', ()=>{
+                    it.block.show.set_and_update(show.checked ? 1 : 0, pref_update)
+                    display_cb()
+                })
+            }
             add_elem(chip, 'span', 'lt_chip_label').innerText = it.label
             chip.addEventListener('click', (e)=>{
                 if (e.target !== show)

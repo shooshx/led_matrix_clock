@@ -1,4 +1,5 @@
 #pragma once
+#include "audio.h"
 #include "Prop.h"
 #include "base_utils.h"
 
@@ -446,75 +447,7 @@ struct TimeLayout : public PropHolder<5>
 };
 
 
-// ---- background effects of the clock faces ----
-
-enum SpecialEffect {
-  FX_NONE = 0,
-  FX_BORDER = 1,  // a border that fades to black towards the middle, optionally pulsing
-  FX_SLIDE = 2,   // a band that fades to black on its sides and sweeps from side to side
-};
-
-// the brightness of an effect (0-1) as the leds should light it to look like the web-ui's preview.
-// a screen shows dim colors much darker than they are (its gamma), leds light them as they are: the faint end of
-// a fade, that is almost black on the screen, was clearly lit on the panel and stopped at once instead of fading
-// to black. only for the effects, the panel's gamma pref is for everything
-const float EFFECT_GAMMA = 2.2f;
-inline float led_level(float a)
-{
-    return a <= 0 ? 0 : powf(a, EFFECT_GAMMA);
-}
-
-// the background effect, over the clock's background and under the texts. t in seconds.
-// same as draw_effect() in the web-ui, but the leds get led_level() of its brightness
-void draw_effect(int fx, uint16_t color, int fx_size, int fx_speed, bool pulse, float t)
-{
-    int w = display.width(), h = display.height();
-    uint8_t r, g, b;
-    color888(color, r, g, b);
-    int size = constrain(fx_size, 1, 64);
-    float speed = constrain(fx_speed, 1, 10);
-    if (fx == FX_BORDER) {
-        float k = 1.0f;
-        if (pulse)
-            k = 0.6f + 0.4f * sinf(2 * PI * t * speed / 6.0f);
-        // the color of each ring, d pixels from the edge
-        uint8_t ring[64][3];
-        for (int d = 0; d < size; ++d) {
-            float a = 1.0f - (float)d / size;
-            a = led_level(a * a * k);
-            ring[d][0] = r * a;
-            ring[d][1] = g * a;
-            ring[d][2] = b * a;
-        }
-        for (int y = 0; y < h; ++y) {
-            bool edge_row = y < size || y >= h - size;
-            for (int x = 0; x < w; ++x) {
-                if (!edge_row && x == size) // skip the middle of the row
-                    x = w - size;
-                int d = min(min(x, y), min(w - 1 - x, h - 1 - y));
-                if (d >= size)
-                    continue;
-                display.drawPixel(x, y, ring[d][0], ring[d][1], ring[d][2]);
-            }
-        }
-    }
-    else if (fx == FX_SLIDE) {
-        float period = 12.0f / speed;
-        float ph = fmodf(t, period) / period;
-        float tri = ph < 0.5f ? ph * 2 : 2 - ph * 2;
-        float half = size / 2.0f;
-        float cx = -half + tri * (w + size);
-        for (int x = max(0, (int)(cx - half)); x <= min(w - 1, (int)(cx + half) + 1); ++x) {
-            float a = 1.0f - fabsf(x + 0.5f - cx) / half;
-            if (a <= 0)
-                continue;
-            a = led_level(a * a);
-            uint8_t cr = r * a, cg = g * a, cb = b * a;
-            for (int y = 0; y < h; ++y)
-                display.drawPixel(x, y, cr, cg, cb);
-        }
-    }
-}
+#include "Effects.h"
 
 // the clock for one orientation: the combined time and date lines, the separate fields and the background
 struct ClockLayout : public PropHolder<12>, public BasePanel
@@ -608,6 +541,8 @@ struct ClockLayout : public PropHolder<12>, public BasePanel
     }
 };
 
+#include "RandomFace.h"
+
 // ---- clock faces and the periods of the day, same as in the web-ui (clock.js) ----
 // a face is everything about how the clock looks: both layouts and the background effect, with a name.
 // a panel without saved faces (new) shows the first face, with the defaults, all day.
@@ -617,17 +552,21 @@ struct ClockLayout : public PropHolder<12>, public BasePanel
 // saved together in the blob "per": a key per prop would be too many for Preferences
 
 const int CLOCK_FACES = 8;
-const int DAY_PERIODS = 12;
+const int DAY_PERIODS = 12;  // of each day type
+const int DAY_TYPES = 4;
 const int DAY_MINUTES = 24 * 60;
 
 // how a face shows the clock
 enum FaceMode {
     FACE_NORMAL = 0,  // the layouts and the effect
     FACE_OFF = 1,     // nothing lit, the panel is dark (also no mode icon)
+    FACE_RANDOM = 2,  // every aspect by chance, another one every m_rnd_int seconds (RandomFace.h)
 };
 
+const int SOUND_FILES_MAX = 160;  // the names of a face's sounds, comma separated
+
 // new props of a face (or a period) have to be added at the end, the blobs are in this order
-struct ClockFace : public BlobHolder<13>
+struct ClockFace : public BlobHolder<22>
 {
     Prop<bool> m_on;
     TextProp m_name;
@@ -635,15 +574,33 @@ struct ClockFace : public BlobHolder<13>
     ClockLayout m_port;
     Prop<int16_t> m_fx;
     Prop<uint16_t> m_fx_color;
-    Prop<int16_t> m_fx_size;  // thickness in pixels
+    Prop<int16_t> m_fx_size;  // 1-64, what it is depends on the effect
     Prop<int16_t> m_fx_speed; // 1-10
-    Prop<bool> m_fx_pulse;    // the border pulses
-    Prop<bool> m_wake;        // when its period starts the clock is shown, also when the display is off or in a game
+    Prop<bool> m_fx_pulse;    // brightens and dims, Border, Slide and Aurora
+    Prop<bool> m_wake;        // not used any more (every period start shows the clock, not in a game), kept for the blob
     Prop<int16_t> m_mode;     // FaceMode
     // the time without seconds, of the landscape and the portrait layout. here and not in ClockLayout so that
     // the blobs from before it still load: new props go at the end
     TimeTextBlock m_hhmm_land;
     TimeTextBlock m_hhmm_port;
+    Prop<int32_t> m_rnd_int;  // Random: seconds between faces
+    Prop<int16_t> m_fx_angle; // degrees, the direction Slide moves in
+    // sounds while it's on: every m_snd_every seconds from the start of its period, for m_snd_total seconds
+    // (not past the period's end), a random one of m_snd_files, the names of /sounds files separated by ','
+    Prop<bool> m_snd_on;
+    TextPropN<SOUND_FILES_MAX> m_snd_files;
+    Prop<int32_t> m_snd_every;
+    Prop<int32_t> m_snd_total;
+    Prop<int16_t> m_snd_volume;  // percent: when its period starts (with m_snd_on) the panel's volume is set to it
+    // the color of the clock mode icon (bottom left) in landscape and portrait. its names are the layouts' ones,
+    // in the web-ui it's an item of the layout (only its color)
+    Prop<uint16_t> m_icon_land;
+    Prop<uint16_t> m_icon_port;
+
+    static const uint16_t ICON_COLOR_DEF = 0x8410;  // gray, MODE_ICON_COLOR
+    uint16_t icon_color() const {
+        return (display.is_portrait() ? m_icon_port : m_icon_land).get();
+    }
 
     ClockFace(IPropHolder* parent, int slot)
       : BlobHolder(parent, String("lf") + slot)
@@ -660,14 +617,32 @@ struct ClockFace : public BlobHolder<13>
       , m_mode(this, m_key + "_mode", FACE_NORMAL)
       , m_hhmm_land(this, m_key + "l_t3", false)
       , m_hhmm_port(this, m_key + "p_t3", false)
+      , m_rnd_int(this, m_key + "_rnd_int", RND_INTERVAL_DEF)
+      , m_fx_angle(this, m_key + "_fx_angle", 0)
+      , m_snd_on(this, m_key + "_snd_on", false)
+      , m_snd_files(this, m_key + "_snd_files", "")
+      , m_snd_every(this, m_key + "_snd_every", 60)
+      , m_snd_total(this, m_key + "_snd_total", 600)
+      , m_snd_volume(this, m_key + "_snd_vol", 30)
+      , m_icon_land(this, m_key + "l_icon_col", ICON_COLOR_DEF)
+      , m_icon_port(this, m_key + "p_icon_col", ICON_COLOR_DEF)
     {}
 
     bool dark() const {
         return m_mode.get() == FACE_OFF;
     }
 
+    bool random() const {
+        return m_mode.get() == FACE_RANDOM;
+    }
+    // the milliseconds a random face is shown
+    unsigned long random_ms() const {
+        return (unsigned long)constrain(m_rnd_int.get(), RND_INTERVAL_MIN, RND_INTERVAL_MAX) * 1000UL;
+    }
+
+    // the effect moves. not of a random face, that's ClockPanel::m_rnd_fx
     bool animated() const {
-        return !dark() && (m_fx.get() == FX_SLIDE || (m_fx.get() == FX_BORDER && m_fx_pulse.get()));
+        return !dark() && !random() && fx_animated(m_fx.get(), m_fx_pulse.get());
     }
 
     void draw(time_t local, float t) {
@@ -678,7 +653,8 @@ struct ClockFace : public BlobHolder<13>
         ClockLayout& l = display.is_portrait() ? m_port : m_land;
         l.draw_back();
         if (m_fx.get() != FX_NONE)
-            draw_effect(m_fx.get(), m_fx_color.get(), m_fx_size.get(), m_fx_speed.get(), m_fx_pulse.get(), t);
+            draw_effect(m_fx.get(), m_fx_color.get(), m_fx_size.get(), m_fx_speed.get(), m_fx_pulse.get(),
+                        m_fx_angle.get(), t);
         l.draw_texts(local);
         TimeTextBlock& hhmm = display.is_portrait() ? m_hhmm_port : m_hhmm_land;
         hhmm.set_time(hour(local), minute(local), second(local), false);
@@ -686,65 +662,212 @@ struct ClockFace : public BlobHolder<13>
     }
 };
 
+// a period of a day type. its names: the prefix ("per" for the first day type, "d1per", "d2per"...) and the
+// slot. the first slot is on until it's changed, a new day type is one period over the whole day
 struct DayPeriod : public PropHolder<3>
 {
     Prop<bool> m_on;
     Prop<int16_t> m_start;  // minute of the day
     Prop<int16_t> m_face;   // the slot of its face
 
-    DayPeriod(IPropHolder* parent, int slot)
+    DayPeriod(IPropHolder* parent, const String& prefix, int slot)
       : PropHolder(parent)
-      , m_on(this, String("per") + slot + "_on", false)
-      , m_start(this, String("per") + slot + "_start", 0)
-      , m_face(this, String("per") + slot + "_face", 0)
+      , m_on(this, prefix + slot + "_on", slot == 0)
+      , m_start(this, prefix + slot + "_start", 0)
+      , m_face(this, prefix + slot + "_face", 0)
     {}
 };
 
+// the periods of a day type, a blob each. the first one's names are the ones from before there were day types
 struct DayPeriods : public BlobHolder<DAY_PERIODS>
 {
     DayPeriod* m_periods[DAY_PERIODS];
 
-    DayPeriods(IPropHolder* parent)
-      : BlobHolder(parent, "per")
+    static String prefix(int type) { return type == 0 ? String("per") : String("d") + type + "per"; }
+
+    DayPeriods(IPropHolder* parent, int type)
+      : BlobHolder(parent, prefix(type))
     {
         for (int i = 0; i < DAY_PERIODS; ++i)
-            m_periods[i] = new DayPeriod(this, i);
+            m_periods[i] = new DayPeriod(this, prefix(type), i);
+    }
+};
+
+// the named types of days ("Weekday", "Off-day"...) and which one each day of the week is. one blob
+struct DayTypes : public BlobHolder<DAY_TYPES * 2 + 7>
+{
+    TextProp* m_name[DAY_TYPES];
+    Prop<bool>* m_on[DAY_TYPES];
+    Prop<int16_t>* m_week[7];  // Sunday first: the day type of each day of the week
+
+    DayTypes(IPropHolder* parent)
+      : BlobHolder(parent, "days")
+    {
+        static const char* const names[] = { "Weekday", "Off-day", "Day 3", "Day 4" };
+        for (int k = 0; k < DAY_TYPES; ++k) {
+            m_name[k] = new TextProp(this, String("dt") + k + "_name", names[k]);
+            m_on[k] = new Prop<bool>(this, String("dt") + k + "_on", k < 2);
+        }
+        for (int d = 0; d < 7; ++d)
+            m_week[d] = new Prop<int16_t>(this, String("wd") + d, 0);
     }
 };
 
 // the clock faces and the periods of the day
-struct ClockPanel : public PropHolder<1 + CLOCK_FACES + 1>
+// a period that's on now: its id (day type * DAY_PERIODS + slot, -1 if none), when it started and how long it is,
+// local times. it can be the last one of the day before, until the first of the day starts
+struct PeriodHere {
+    int id = -1;
+    time_t start = 0;
+    long length = 0;  // seconds, until the next one starts
+};
+
+struct ClockPanel : public PropHolder<1 + CLOCK_FACES + DAY_TYPES + 1>
 {
     static const unsigned long SIMULATE_MS = 30000;
 
     Prop<int16_t> m_tz_offset;
     ClockFace* m_faces[CLOCK_FACES];
-    DayPeriods m_day;
+    DayPeriods* m_days[DAY_TYPES];  // the periods of each day type
+    DayTypes m_types;
     // "Show on panel" in the web-ui: the clock is shown as if it's this minute of the day, -1 is the real time.
     // only for SIMULATE_MS after it was set, the web-ui sends it again while it's on, it ends if the page is closed
     int m_sim_minute = -1;
+    int m_sim_type = 0;  // the day type it shows then
     unsigned long m_sim_set = 0;
+    // the random face shown for a face in Random mode, landscape and portrait. made again when another random
+    // face is shown, and after its m_rnd_int
+    RandomLayout* m_rnd[2];
+    RndFx m_rnd_fx[2];
+    const ClockFace* m_rnd_face = nullptr;
+    unsigned long m_rnd_made = 0;
+    RndMeasure m_measure;
 
     ClockPanel(NamesIndex* name_index)
       : PropHolder(name_index)
       , m_tz_offset(this, "tz_offset", 3)
-      , m_day(this)
+      , m_types(this)
     {
-        // registered after m_day: the order of the props here doesn't matter, every face and the periods are
-        // separate blobs
+        // the order of the props here doesn't matter, every face, the periods of each day type and the day
+        // types are separate blobs
+        for (int k = 0; k < DAY_TYPES; ++k)
+            m_days[k] = new DayPeriods(this, k);
         for (int i = 0; i < CLOCK_FACES; ++i)
             m_faces[i] = new ClockFace(this, i);
+        for (int i = 0; i < 2; ++i)
+            m_rnd[i] = new RandomLayout();
     }
 
-    DayPeriod* period(int slot) { return m_day.m_periods[slot]; }
+    // the random face for f should be made again: it's another face, or its time is up
+    bool random_due(const ClockFace* f) const {
+        return m_rnd_face != f || millis() - m_rnd_made >= f->random_ms();
+    }
+    // a new random face for f, for both orientations
+    void make_random(const ClockFace* f) {
+        unsigned long start = millis();
+        // the panel's long and short side, whatever its rotation now
+        int lng = max(display.width(), display.height()), shrt = min(display.width(), display.height());
+        make_random_face(*m_rnd[0], m_rnd_fx[0], m_measure, lng, shrt);
+        make_random_face(*m_rnd[1], m_rnd_fx[1], m_measure, shrt, lng);
+        m_rnd_face = f;
+        m_rnd_made = millis();
+        Serial.printf("clock: a random face, made in %lu ms\n", m_rnd_made - start);
+    }
+    // the effect of the random face shown now
+    const RndFx& random_fx() const {
+        return m_rnd_fx[display.is_portrait() ? 1 : 0];
+    }
+
+    void draw_random(time_t local, float t) {
+        RandomLayout& rl = *m_rnd[display.is_portrait() ? 1 : 0];
+        const RndFx& fx = random_fx();
+        rl.m_l.draw_back();
+        if (fx.fx != FX_NONE)
+            draw_effect(fx.fx, fx.color, fx.size, fx.speed, fx.pulse, fx.angle, t);
+        rl.draw(local);
+    }
+
+    // a period by its id: day type * DAY_PERIODS + slot
+    DayPeriod* period(int id) { return m_days[id / DAY_PERIODS]->m_periods[id % DAY_PERIODS]; }
 
     time_t local_time(time_t utcTime) const {
         return utcTime + m_tz_offset.get() * 3600;
     }
 
-    // minute of the day, -1 stops
-    void simulate(int minute) {
+    // the day type of a day of the week (0 Sunday). one that isn't there (deleted) is the first one
+    int day_type(int wday) {
+        int k = m_types.m_week[((wday % 7) + 7) % 7]->get();
+        return (k >= 0 && k < DAY_TYPES && m_types.m_on[k]->get()) ? k : 0;
+    }
+
+    // of the periods of a day type: the one that started last at or before a minute (-1: all of them, the
+    // day's last one), or the first one of the day. -1 if it has none
+    int last_started(int type, int minute) {
+        int best = -1;
+        for (int i = 0; i < DAY_PERIODS; ++i) {
+            int id = type * DAY_PERIODS + i;
+            DayPeriod* p = period(id);
+            if (!p->m_on.get() || (minute >= 0 && p->m_start.get() > minute))
+                continue;
+            if (best < 0 || p->m_start.get() > period(best)->m_start.get())
+                best = id;
+        }
+        return best;
+    }
+    int first_of(int type) {
+        int best = -1;
+        for (int i = 0; i < DAY_PERIODS; ++i) {
+            int id = type * DAY_PERIODS + i;
+            DayPeriod* p = period(id);
+            if (p->m_on.get() && (best < 0 || p->m_start.get() < period(best)->m_start.get()))
+                best = id;
+        }
+        return best;
+    }
+
+    // the period that's on at a local time: of the day type of its day of the week (or the given one, for the
+    // web-ui's preview of a day type). before the day's first period starts, the last one of the day before
+    // goes on. it ends when the next one starts, or the first one of the next day
+    PeriodHere period_here(time_t local, int force_type = -1) {
+        PeriodHere r;
+        int wd = weekday(local) - 1;  // 0 Sunday
+        int minute_now = hour(local) * 60 + minute(local);
+        time_t day0 = local - (minute_now * 60 + second(local));  // midnight
+        auto type_of = [&](int d) { return force_type >= 0 ? force_type : day_type(d); };
+        int start_wd = wd;
+        int id = last_started(type_of(wd), minute_now);
+        if (id < 0) {  // the day before's last one
+            start_wd = (wd + 6) % 7;
+            day0 -= 86400;
+            id = last_started(type_of(start_wd), -1);
+        }
+        if (id < 0)
+            return r;
+        int start = period(id)->m_start.get();
+        // the end: the next start that day, else the first of the next day
+        int type = id / DAY_PERIODS, next = -1;
+        for (int i = 0; i < DAY_PERIODS; ++i) {
+            DayPeriod* p = period(type * DAY_PERIODS + i);
+            if (p->m_on.get() && p->m_start.get() > start && (next < 0 || p->m_start.get() < next))
+                next = p->m_start.get();
+        }
+        long end;
+        if (next >= 0)
+            end = next * 60L;
+        else {
+            int f = first_of(type_of((start_wd + 1) % 7));
+            end = 86400L + (f >= 0 ? period(f)->m_start.get() : 0) * 60L;
+        }
+        r.id = id;
+        r.start = day0 + start * 60L;
+        r.length = max(60L, end - start * 60L);
+        return r;
+    }
+
+    // minute of the day and the day type to show it with ("Show on panel"), -1 stops
+    void simulate(int minute, int type) {
         m_sim_minute = (minute >= 0 && minute < DAY_MINUTES) ? minute : -1;
+        m_sim_type = (type >= 0 && type < DAY_TYPES) ? type : 0;
         m_sim_set = millis();
     }
     bool simulating() {
@@ -761,26 +884,13 @@ struct ClockPanel : public PropHolder<1 + CLOCK_FACES + 1>
         return local - (hour(local) * 60 + minute(local)) * 60 + m_sim_minute * 60;
     }
 
-    // the period at a minute of the day: the last one that started, before the first is the last one of the
-    // day before. -1 if there are no periods
-    int period_at(int minute) {
-        int last = -1, cur = -1;
-        for (int i = 0; i < DAY_PERIODS; ++i) {
-            DayPeriod* p = period(i);
-            if (!p->m_on.get())
-                continue;
-            if (last < 0 || p->m_start.get() > period(last)->m_start.get())
-                last = i;
-            if (p->m_start.get() <= minute && (cur < 0 || p->m_start.get() > period(cur)->m_start.get()))
-                cur = i;
-        }
-        return cur >= 0 ? cur : last;
-    }
-
-    // the period the clock shows now, also the simulated time
+    // the period the clock shows now, also the simulated time and day type
     int period_now(time_t utcTime) {
-        time_t local = shown_time(utcTime);
-        return period_at(hour(local) * 60 + minute(local));
+        return period_here(shown_time(utcTime), simulating() ? m_sim_type : -1).id;
+    }
+    // the period of "Show on panel" while it's on, else -1
+    int sim_period(time_t utcTime) {
+        return simulating() ? period_here(shown_time(utcTime), m_sim_type).id : -1;
     }
 
     // the face of a period. a face that was deleted (or no period) is the first face
@@ -796,15 +906,20 @@ struct ClockPanel : public PropHolder<1 + CLOCK_FACES + 1>
         return m_faces[0];
     }
 
-    // the period now if its face takes over the display when it starts, else -1. the real time, not simulated
-    int wake_period(time_t utcTime) {
-        time_t local = local_time(utcTime);
-        int p = period_at(hour(local) * 60 + minute(local));
-        return (p >= 0 && face_of(p)->m_wake.get()) ? p : -1;
+    // the period now by the real time, not the simulated one
+    PeriodHere real_period(time_t utcTime) {
+        return period_here(local_time(utcTime));
     }
 
     void draw(time_t utcTime) {
-        face_of(period_now(utcTime))->draw(shown_time(utcTime), millis() / 1000.0f);
+        ClockFace* f = face_of(period_now(utcTime));
+        if (!f->random()) {
+            f->draw(shown_time(utcTime), fx_time());
+            return;
+        }
+        if (random_due(f))
+            make_random(f);
+        draw_random(shown_time(utcTime), fx_time());
     }
 };
 
@@ -822,6 +937,47 @@ private:
     int m_drawn_period = -2;
     ClockFace* m_drawn_face = nullptr;
     unsigned long m_last_anim = 0;
+
+    // the sounds of the face: which period (and when it started, the same period another day is another one),
+    // the last play of it that was due, and if a sound of it plays now
+    int m_snd_period = -1;
+    time_t m_snd_start = 0;
+    long m_snd_k = -1;
+    bool m_snd_playing = false;
+    bool m_snd_sim = false;            // the period is "Show on panel"'s, not the real one
+    unsigned long m_snd_sim_ms = 0;    // when that started
+    // start_volume(): the period it saw last (-2 none yet: no start at boot), when that started, the preview's
+    int m_vol_period = -2;
+    time_t m_vol_start = 0;
+    int m_vol_sim_period = -2;
+    static const int SND_LATE_S = 2;  // a play starts only this late, not when the clock shows up in the middle
+
+    void stop_face_sound() {
+        if (m_snd_playing && audio_playing_file())
+            audio_stop();
+        m_snd_playing = false;
+    }
+
+    // a random one of the face's sounds that are in the file system, nullptr if none
+    static const String* pick_sound(ClockFace* f) {
+        std::vector<const String*> have;
+        String names = f->m_snd_files.get();
+        int pos = 0;
+        while (pos <= (int)names.length()) {
+            int comma = names.indexOf(',', pos);
+            if (comma < 0)
+                comma = names.length();
+            String name = names.substring(pos, comma);
+            name.trim();
+            for (const String& s : audio_sounds())
+                if (name.length() > 0 && s == name)
+                    have.push_back(&s);
+            pos = comma + 1;
+        }
+        if (have.empty())
+            return nullptr;
+        return have[esp_random() % have.size()];
+    }
 
 public:
     ClockState(NamesIndex* prop_map)
@@ -851,9 +1007,124 @@ public:
         ClockFace* f = m_panel.face_of(p);
         if (p != m_drawn_period || f != m_drawn_face)
             return true;
-        if (f->animated() && millis() - m_last_anim >= ANIM_MS)
+        if (f->random() && m_panel.random_due(f))
+            return true;  // another random face
+        bool moves = f->random() ? m_panel.random_fx().animated() : f->animated();
+        if (moves && millis() - m_last_anim >= ANIM_MS)
             return true;
         return false;
+    }
+
+    // called in loop: when a period whose face has sounds starts (by the real time, or "Show on panel" starts
+    // showing one), the volume that face wants, else -1. whatever the display shows, not at boot
+    int start_volume() {
+        int vol = -1;
+        // the real time
+        if (m_epoch_time >= 1600000000UL) {
+            PeriodHere ph = m_panel.real_period(m_epoch_time);
+            int p = ph.id;
+            time_t started = ph.start;
+            if (p != m_vol_period || started != m_vol_start) {
+                if (m_vol_period != -2 && p >= 0 && m_panel.face_of(p)->m_snd_on.get())
+                    vol = m_panel.face_of(p)->m_snd_volume.get();
+                m_vol_period = p;
+                m_vol_start = started;
+            }
+        }
+        // the preview
+        int sp = m_panel.simulating() ? m_panel.sim_period(m_epoch_time) : -2;
+        if (sp != m_vol_sim_period) {
+            if (sp >= 0 && m_panel.face_of(sp)->m_snd_on.get())
+                vol = m_panel.face_of(sp)->m_snd_volume.get();
+            m_vol_sim_period = sp;
+        }
+        return vol < 0 ? -1 : constrain(vol, 0, 100);
+    }
+
+    // called in loop: plays the sounds of the face now. shown: the clock is on the display (not another mode, not
+    // off). by the real time: when its period ends, or after its total time, what plays stops.
+    // while the web-ui's "Show on panel" simulates a period, its sounds play as if it started when the simulation
+    // of it started (only their own total time, a preview has no end)
+    void update_sound(bool shown) {
+        if (!shown) {
+            stop_face_sound();
+            m_snd_sim = false;
+            m_snd_period = -1;
+            return;
+        }
+        int p;
+        long elapsed, total_max;
+        if (m_panel.simulating()) {
+            p = m_panel.sim_period(m_epoch_time);
+            if (!m_snd_sim || p != m_snd_period) {
+                // the preview started, or of another period
+                stop_face_sound();
+                m_snd_sim = true;
+                m_snd_period = p;
+                m_snd_sim_ms = millis();
+                m_snd_k = -1;
+            }
+            elapsed = (long)((millis() - m_snd_sim_ms) / 1000);
+            total_max = 0x7FFFFFFFL;
+        }
+        else {
+            if (m_snd_sim) {  // the preview ended
+                stop_face_sound();
+                m_snd_sim = false;
+                m_snd_period = -1;
+            }
+            if (m_epoch_time < 1600000000UL) {  // before NTP the time is unknown
+                stop_face_sound();
+                return;
+            }
+            PeriodHere ph = m_panel.real_period(m_epoch_time);
+            p = ph.id;
+            if (p < 0) {
+                stop_face_sound();
+                return;
+            }
+            elapsed = (long)(m_panel.local_time(m_epoch_time) - ph.start);
+            time_t started = ph.start;
+            if (p != m_snd_period || started != m_snd_start) {
+                // another period: what plays from the one before doesn't go on into it
+                stop_face_sound();
+                m_snd_period = p;
+                m_snd_start = started;
+                m_snd_k = -1;
+            }
+            total_max = ph.length;
+        }
+        if (p < 0) {
+            stop_face_sound();
+            return;
+        }
+        if (m_snd_playing && !audio_playing_file())
+            m_snd_playing = false;  // it ended
+
+        ClockFace* f = m_panel.face_of(p);
+        long every = max((int32_t)1, f->m_snd_every.get());
+        long total = min((long)f->m_snd_total.get(), total_max);
+        if (!f->m_snd_on.get() || elapsed >= total) {
+            stop_face_sound();
+            return;
+        }
+        long k = elapsed / every;
+        if (k != m_snd_k) {
+            m_snd_k = k;
+            if (elapsed - k * every <= SND_LATE_S) {
+                const String* name = pick_sound(f);
+                if (name != nullptr) {
+                    Serial.printf("clock: sound %s, %ld s into the period\n", name->c_str(), elapsed);
+                    audio_play(name->c_str());
+                    m_snd_playing = true;
+                }
+            }
+        }
+    }
+
+    // the color of the clock mode icon of the face now
+    uint16_t icon_color() {
+        return m_panel.face_of(m_panel.period_now(m_epoch_time))->icon_color();
     }
 
     // the face now shows nothing, also no mode icon

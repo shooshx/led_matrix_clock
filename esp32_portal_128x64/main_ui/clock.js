@@ -4,8 +4,46 @@
 const PX_LONG = 128
 const PX_SHORT = 64
 
-// the clock for one orientation: the time with and without seconds, the date line and the separate fields
-// same as ClockLayout in the firmware (where the time without seconds is in ClockFace)
+// the clock mode icon at the bottom left (icon_clock in ModeIcons.h), 8x8, a byte per row, the MSB on the left
+const ICON_CLOCK = [0x3C, 0x42, 0x91, 0x91, 0x9D, 0x81, 0x42, 0x3C]
+const ICON_SIZE = 8
+const ICON_COLOR_DEF = 0x8410  // gray, as in the firmware
+
+// the clock icon as an item of the layout: always shown, always at the bottom left, only its color can change
+// (ClockFace::m_icon_land / m_icon_port in the firmware). it has no checkbox and can't be dragged
+class IconBlock
+{
+    constructor(name, pref_json)
+    {
+        this.color = ColorProp.from_json(name + "_icon_col", pref_json, ICON_COLOR_DEF)
+        this.show = {v:1}
+        this.fixed = true
+    }
+    draw(gfx, drawers) {}  // drawn over the preview by draw_icon()
+    add_ui(ctrl, display_cb, pref_update) {
+        const line = add_div(ctrl, 'ctrl_line')
+        const col_in = add_elem(line, 'input', 'clock_col_in')
+        ColorEditBox.create_at(col_in, 300, (c)=>{
+            this.color.set_and_update(c, pref_update)
+            display_cb()
+        }, {}, ColorPicker.make_hex(this.color, true))
+        add_elem(line, 'span', 'cf_note').innerText = "  always shown at the bottom left, only its color can change"
+    }
+    // into the preview's canvas, on a black square like on the panel
+    draw_icon(canvas, h) {
+        const y0 = h - ICON_SIZE, c = this.color
+        for (let y = 0; y < ICON_SIZE; ++y)
+            for (let x = 0; x < ICON_SIZE; ++x) {
+                const on = (ICON_CLOCK[y] >> (7 - x)) & 1
+                canvas.setPixel(x, y0 + y, on ? c.r : 0, on ? c.g : 0, on ? c.b : 0)
+            }
+        return {x0: 0, y0: y0, x1: ICON_SIZE - 1, y1: h - 1}
+    }
+}
+
+// the clock for one orientation: the time with and without seconds, the date line and the separate fields,
+// and the clock icon. same as ClockLayout in the firmware (where the time without seconds and the icon's color
+// are in ClockFace)
 class ClockLayout extends Layout
 {
     constructor(name, pref_json)
@@ -21,6 +59,7 @@ class ClockLayout extends Layout
         this.day = this.add("Day", new FieldTextBlock(name + "_fd", pref_json, 'day'))
         this.month = this.add("Month", new FieldTextBlock(name + "_fo", pref_json, 'month'))
         this.year = this.add("Year", new FieldTextBlock(name + "_fy", pref_json, 'year'))
+        this.icon = this.add("Clock icon", new IconBlock(name, pref_json))
         this.show_day = NumProp.from_json(name + "_show_day", pref_json)
     }
 
@@ -64,14 +103,21 @@ class ClockLayout extends Layout
 // a period starts at its start minute and lasts until the next period starts, the last one goes on over
 // midnight until the first one. so the periods always cover the whole day, one period is the whole day.
 // the periods are in DAY_PERIODS slots "per0".."per11": perN_on, perN_start, perN_face (the face's slot).
-// the order of the periods is by start, not by slot, so adding and deleting doesn't move the other slots
+// the order of the periods is by start, not by slot, so adding and deleting doesn't move the other slots.
+// there are DAY_TYPES named types of days ("Weekday", "Off-day"...), each with its own periods: the first
+// one's are "perN_*", the others' "d1perN_*", "d2perN_*"... (dtK_name, dtK_on). which type each day of the
+// week is: wd0 (Sunday) .. wd6. before a day's first period starts, the last one of the day before goes on
 
-const FX_NONE = 0, FX_BORDER = 1, FX_SLIDE = 2
 // how a face shows the clock, same as FaceMode in the firmware
 const FACE_NORMAL = 0  // the layouts and the effect
 const FACE_OFF = 1     // nothing lit, the panel is dark (also no mode icon)
+const FACE_RANDOM = 2  // every aspect by chance, another one every rnd_int seconds (random_face.js)
+const RANDOM_BAR = 'linear-gradient(90deg, #e04040, #e0a020, #d0d020, #40c040, #30b0e0, #8060f0, #d040c0)'
 const CLOCK_FACES = 8
-const DAY_PERIODS = 12
+const DAY_PERIODS = 12  // of each day type
+const DAY_TYPES = 4
+const DAY_TYPE_NAMES = ["Weekday", "Off-day", "Day 3", "Day 4"]
+const WEEK_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 const DAY_MINUTES = 24 * 60
 const DRAG_SNAP = 5    // minutes, dragging a boundary on the timeline. the time inputs set any minute
 const MIN_PERIOD = 1   // minutes
@@ -105,6 +151,32 @@ class TextProp
     }
 }
 
+const SOUND_FILES_MAX = 160  // the names of a face's sounds with the commas, like the firmware's
+const SND_TIME_MAX = 24 * 3600  // seconds
+
+// a number of seconds as a number and a unit (seconds / minutes / hours), into prop when it's changed
+function add_duration_input(parent, prop, min_s, max_s, pref_update)
+{
+    const units = [{value:1, text:"seconds"}, {value:60, text:"minutes"}, {value:3600, text:"hours"}]
+    const secs = prop.v
+    const unit0 = [3600, 60, 1].find((u)=>secs % u == 0 && secs / u >= 1) || 1
+    const num = add_elem(parent, 'input', 'cf_rnd_n')
+    num.setAttribute('type', 'number')
+    num.setAttribute('min', 1)
+    num.value = secs / unit0
+    const unit = add_select(parent, null, units, unit0, ()=>{ set() })
+    const set = ()=>{
+        let n = parseFloat(num.value)
+        if (isNaN(n) || n <= 0)
+            n = 1
+        const v = Math.round(Math.min(max_s, Math.max(min_s, n * parseInt(unit.value))))
+        num.value = Math.round(v / parseInt(unit.value) * 1000) / 1000
+        if (v != prop.v)
+            prop.set_and_update(v, pref_update)
+    }
+    num.addEventListener('change', set)
+}
+
 // a named face
 class ClockFace
 {
@@ -120,9 +192,20 @@ class ClockFace
         this.fx_size = NumProp.from_json(n + "_fx_size", pref_json, 8)
         this.fx_speed = NumProp.from_json(n + "_fx_speed", pref_json, 3)
         this.fx_pulse = NumProp.from_json(n + "_fx_pulse", pref_json, 1)
-        // when a period with it starts, the panel shows the clock, also when it was off or in a game
+        // not used any more (every period start shows the clock, not in a game), kept like the firmware's
         this.wake = NumProp.from_json(n + "_wake", pref_json, 0)
         this.mode = NumProp.from_json(n + "_mode", pref_json, FACE_NORMAL)
+        this.rnd_int = NumProp.from_json(n + "_rnd_int", pref_json, RND_INTERVAL_DEF)  // seconds, Random
+        this.fx_angle = NumProp.from_json(n + "_fx_angle", pref_json, 0)  // degrees, the direction Slide moves in
+        // sounds while it's on: every snd_every seconds from the start of its period, for snd_total seconds (not
+        // past its end), a random one of snd_files, the names of the panel's /sounds files separated by ','
+        this.snd_on = NumProp.from_json(n + "_snd_on", pref_json, 0)
+        this.snd_files = TextProp.from_json(n + "_snd_files", pref_json, "")
+        this.snd_every = NumProp.from_json(n + "_snd_every", pref_json, 60)
+        this.snd_total = NumProp.from_json(n + "_snd_total", pref_json, 600)
+        this.snd_volume = NumProp.from_json(n + "_snd_vol", pref_json, 30)  // the panel's volume when its period starts
+        if (this.fx.v == FX_SKY_REMOVED)  // shows nothing
+            this.fx.v = FX_NONE
     }
 
     dark() {
@@ -130,12 +213,13 @@ class ClockFace
     }
 
     animated() {
-        return !this.dark() && (this.fx.v == FX_SLIDE || (this.fx.v == FX_BORDER && this.fx_pulse.v))
+        return !this.dark() && fx_animated(this.fx.v, this.fx_pulse.v)
     }
 
     // all the props of how the face looks (not its name), in the same order in every face
     face_props() {
-        const out = [this.fx, this.fx_color, this.fx_size, this.fx_speed, this.fx_pulse, this.wake, this.mode]
+        const out = [this.fx, this.fx_color, this.fx_size, this.fx_speed, this.fx_pulse, this.wake, this.mode, this.rnd_int, this.fx_angle,
+                     this.snd_on, this.snd_files, this.snd_every, this.snd_total, this.snd_volume]
         for (const l of this.layouts) {
             out.push(l.show_day)
             for (const it of l.items)
@@ -164,9 +248,16 @@ class ClockFace
     }
 
     // for the timeline and the list: the color of the time text of the landscape layout, or the first shown text
+    random() {
+        return this.mode.v == FACE_RANDOM
+    }
+
+    // for the timeline and the list: a css background
     css_color() {
         if (this.dark())
             return '#000000'
+        if (this.random())
+            return RANDOM_BAR
         const l = this.layouts[0]
         const it = l.time.show.v ? l.items[0] : (l.items.find((i)=>i.block.show.v) || l.items[0])
         const c = it.block.color
@@ -176,54 +267,40 @@ class ClockFace
     }
 }
 
-// a part of the day and the face it shows
+// a part of the day and the face it shows. the first slot is on until it's changed
 class DayPeriod
 {
-    constructor(slot, pref_json)
+    constructor(type, slot, pref_json)
     {
-        const n = "per" + slot
+        const n = (type == 0 ? "per" : "d" + type + "per") + slot
+        this.type = type
         this.slot = slot
-        this.on = NumProp.from_json(n + "_on", pref_json, 0)
+        this.on = NumProp.from_json(n + "_on", pref_json, slot == 0 ? 1 : 0)
         this.start = NumProp.from_json(n + "_start", pref_json, 0)
         this.face = NumProp.from_json(n + "_face", pref_json, 0)
     }
 }
 
-// the background effect into the canvas, t in seconds. same as SpecialPeriod::draw_effect() in the firmware
-function draw_effect(canvas, w, h, sp, t)
+// a named type of day and its periods
+class DayType
 {
-    const {r, g, b} = sp.fx_color
-    const size = Math.min(64, Math.max(1, sp.fx_size.v))
-    const speed = Math.min(10, Math.max(1, sp.fx_speed.v))
-    if (sp.fx.v == FX_BORDER) {
-        const k = sp.fx_pulse.v ? 0.6 + 0.4 * Math.sin(2 * Math.PI * t * speed / 6.0) : 1.0
-        for (let y = 0; y < h; ++y) {
-            for (let x = 0; x < w; ++x) {
-                const d = Math.min(x, y, w - 1 - x, h - 1 - y)
-                if (d >= size)
-                    continue
-                let a = 1.0 - d / size
-                a = a * a * k
-                canvas.setPixel(x, y, Math.trunc(r * a), Math.trunc(g * a), Math.trunc(b * a))
-            }
-        }
+    constructor(slot, pref_json)
+    {
+        this.slot = slot
+        this.name = TextProp.from_json("dt" + slot + "_name", pref_json, DAY_TYPE_NAMES[slot])
+        this.on = NumProp.from_json("dt" + slot + "_on", pref_json, slot < 2 ? 1 : 0)
+        this.all_periods = []
+        for (let i = 0; i < DAY_PERIODS; ++i)
+            this.all_periods.push(new DayPeriod(slot, i, pref_json))
+        if (!this.all_periods.some((p)=>p.on.v))
+            this.all_periods[0].on.v = 1
     }
-    else if (sp.fx.v == FX_SLIDE) {
-        const period = 12.0 / speed
-        const ph = (t % period) / period
-        const tri = ph < 0.5 ? ph * 2 : 2 - ph * 2
-        const half = size / 2.0
-        const cx = -half + tri * (w + size)
-        for (let x = Math.max(0, Math.trunc(cx - half)); x <= Math.min(w - 1, Math.trunc(cx + half) + 1); ++x) {
-            let a = 1.0 - Math.abs(x + 0.5 - cx) / half
-            if (a <= 0)
-                continue
-            a = a * a
-            for (let y = 0; y < h; ++y)
-                canvas.setPixel(x, y, Math.trunc(r * a), Math.trunc(g * a), Math.trunc(b * a))
-        }
+    // in their order in the day
+    periods() {
+        return this.all_periods.filter((p)=>p.on.v).sort((a, b)=>a.start.v - b.start.v)
     }
 }
+
 
 class ClockPanel
 {
@@ -235,31 +312,90 @@ class ClockPanel
             this.faces.push(new ClockFace(i, pref_json))
         if (!this.faces.some((f)=>f.on.v))
             this.faces[0].on.v = 1
-        this.all_periods = []
-        for (let i = 0; i < DAY_PERIODS; ++i)
-            this.all_periods.push(new DayPeriod(i, pref_json))
-        if (!this.all_periods.some((p)=>p.on.v))
-            this.all_periods[0].on.v = 1
+        this.day_types = []
+        for (let k = 0; k < DAY_TYPES; ++k)
+            this.day_types.push(new DayType(k, pref_json))
+        this.day_types[0].on.v = 1  // there's always the first one
+        this.week = []  // the day type of each day of the week, Sunday first
+        for (let d = 0; d < 7; ++d)
+            this.week.push(NumProp.from_json("wd" + d, pref_json, 0))
+        this.sel_type = this.day_types[0]  // the day type whose periods are edited
         this.now_minute = 0
         this.active = null         // the period of the time now
         this.anim_timer = null
         this.display_cb = null
         this.pref_update = null
         this.layouts_changed = null // set by time_generic_create, makes the layout editors again
+        this.rnd = null             // the random face shown: {face, made (ms), faces: [landscape, portrait] {layout, fx}}
+        this.rnd_count = 0
         this.mirror_to_panel = true // "Show on panel" for the preview
         // the parts of the ui that depend on the selection, made in add_ui
         this.timeline = null
+        this.days_ui = null
         this.period_ui = null
         this.face_ui = null
         this.sel_face = null
         this.update_time(()=>{})
+        this.sel_type = this.day_types[this.active.type]  // today's, or yesterday's while its last period goes on
         this.sel_period = this.active          // the period whose time and face are edited
         this.sel_face = this.face_of(this.active) // the face that's edited and previewed
     }
 
-    // the layouts of the edited face, the previews and the layout editors show them
+    // the periods of the edited day type
+    get all_periods() {
+        return this.sel_type.all_periods
+    }
+    used_day_types() {
+        return this.day_types.filter((t)=>t.on.v)
+    }
+    // the day type of a day of the week (0 Sunday). one that was deleted is the first one
+    day_type_of(wday) {
+        const t = this.day_types[this.week[wday].v]
+        return (t !== undefined && t.on.v) ? t : this.day_types[0]
+    }
+    // the period on at a minute of a day of the week, by the day types of the days: before the day's first
+    // period, the last one of the day before
+    period_on(wday, minute) {
+        const ps = this.day_type_of(wday).periods()
+        let cur = null
+        for (const p of ps)
+            if (p.start.v <= minute)
+                cur = p
+        if (cur !== null)
+            return cur
+        const yps = this.day_type_of((wday + 6) % 7).periods()
+        return yps.length > 0 ? yps[yps.length - 1] : ps[0]
+    }
+
+    // the layouts of the edited face, the previews and the layout editors show them.
+    // a random face: the ones that were made by chance
     get layouts() {
-        return this.sel_face.layouts
+        const r = this.random_now()
+        return r !== null ? r.faces.map((f)=>f.layout) : this.sel_face.layouts
+    }
+
+    // the random face shown for the edited face if it's random, made when there's none or it's time for another
+    random_now() {
+        const f = this.sel_face
+        if (f === null || !f.random())
+            return null
+        const r = this.rnd
+        const interval = Math.min(RND_INTERVAL_MAX, Math.max(RND_INTERVAL_MIN, f.rnd_int.v)) * 1000
+        if (r === null || r.face !== f || Date.now() - r.made >= interval)
+            this.shuffle()
+        return this.rnd
+    }
+
+    // another random face now, for the landscape and the portrait previews
+    shuffle() {
+        this.rnd = {face: this.sel_face, made: Date.now(),
+                    faces: [make_random_face(PX_LONG, PX_SHORT), make_random_face(PX_SHORT, PX_LONG)]}
+        this.rnd_count += 1
+    }
+
+    // the layouts can be edited: not of a random face
+    layouts_editable() {
+        return !this.sel_face.random()
     }
 
     used_faces() {
@@ -270,14 +406,17 @@ class ClockPanel
         const f = this.faces[p.face.v]
         return (f !== undefined && f.on.v) ? f : this.used_faces()[0]
     }
-    // the periods that show a face
+    // the periods that show a face, of all the day types
     periods_of(f) {
-        return this.periods().filter((p)=>this.face_of(p) === f)
+        const out = []
+        for (const t of this.used_day_types())
+            out.push(...t.periods().filter((p)=>this.face_of(p) === f))
+        return out
     }
 
-    // the periods in their order in the day
+    // the periods of the edited day type in their order in the day
     periods() {
-        return this.all_periods.filter((p)=>p.on.v).sort((a, b)=>a.start.v - b.start.v)
+        return this.sel_type.periods()
     }
     // the period after / before p, around the day
     next(p) {
@@ -309,7 +448,9 @@ class ClockPanel
         window.setInterval(()=>{ this.update_time(display_cb) }, 1000)
         // the moving effects
         this.anim_timer = window.setInterval(()=>{
-            if (this.sel_face.animated())
+            const r = this.random_now()
+            const fx = r !== null ? r.faces[0].fx : this.sel_face
+            if (r !== null ? fx_animated(fx.fx.v, fx.fx_pulse.v) : this.sel_face.animated())
                 this.display_cb()
         }, 40)
     }
@@ -320,12 +461,16 @@ class ClockPanel
         const utc = ld.getTime()
         const d = new Date(utc + 3600000*this.offset.v + ld.getTimezoneOffset()*60000)
         this.now_minute = d.getHours() * 60 + d.getMinutes()
-        const active = this.period_at(this.now_minute)
+        const active = this.period_on(d.getDay(), this.now_minute)
         const changed = active !== this.active
         this.active = active
-        if (this.sel_face !== null)
-            for (const l of this.sel_face.layouts)
+        if (this.sel_face !== null) {
+            const before = this.rnd_count
+            for (const l of this.layouts)  // a random face may be made again here
                 l.set_time(d)
+            if (this.rnd_count != before && this.layouts_changed !== null)
+                this.layouts_changed()
+        }
         if (this.timeline !== null)
             this.timeline.update(changed)
         display_cb()
@@ -338,8 +483,118 @@ class ClockPanel
 
     // called for every preview before its layout is drawn: the effect of the edited face
     before_layout_draw(layout, view) {
-        if (this.sel_face.fx.v != FX_NONE && !this.sel_face.dark())
-            draw_effect(view.canvas, view.w, view.h, this.sel_face, Date.now() / 1000)
+        if (this.sel_face.dark())
+            return
+        const r = this.random_now()
+        // the random face of this preview's size
+        const rf = r !== null ? (r.faces.find((f)=>f.layout === layout) || r.faces[0]) : null  // made again meanwhile
+        const fx = rf !== null ? rf.fx : this.sel_face
+        if (fx.fx.v != FX_NONE)
+            draw_effect(view.canvas, view.w, view.h, fx, Date.now() / 1000)
+    }
+
+    // edit the periods of another day type
+    select_type(t) {
+        this.sel_type = t
+        const ps = t.periods()
+        this.sel_period = ps.includes(this.active) ? this.active : ps[0]
+        this.select_face(this.face_of(this.sel_period))
+    }
+
+    // the days: pick the one to edit, its name, new / delete
+    make_days_ui(box)
+    {
+        const t = this.sel_type, pref_update = this.pref_update
+        box.replaceChildren()
+
+        const list = add_div(box, 'cf_face_list')
+        for (const o of this.used_day_types()) {
+            const chip = add_div(list, 'cf_face_chip')
+            chip.setAttribute('selected', o === t)
+            add_elem(chip, 'span', 'cf_face_name').innerText = o.name.v
+            const n = this.week.filter((w, d)=>this.day_type_of(d) === o).length
+            add_elem(chip, 'span', 'cf_face_uses').innerText = n == 0 ? " unused" : " " + n + "d"
+            chip.setAttribute('title', n + " days of the week")
+            chip.addEventListener('click', ()=>{ this.select_type(o) })
+        }
+
+        // the name, sent when the typing is done
+        const l1 = add_div(box, 'cf_line')
+        add_elem(l1, 'span', 'cf_label').innerText = "Name "
+        const name_in = add_elem(l1, 'input', 'cf_name_in')
+        name_in.setAttribute('type', 'text')
+        name_in.setAttribute('maxlength', FACE_NAME_MAX)
+        name_in.value = t.name.v
+        name_in.addEventListener('input', ()=>{
+            t.name.v = name_in.value
+            const chip = list.children[this.used_day_types().indexOf(t)]
+            if (chip)
+                chip.querySelector('.cf_face_name').innerText = t.name.v
+        })
+        name_in.addEventListener('change', ()=>{
+            const v = name_in.value.trim() || DAY_TYPE_NAMES[t.slot]
+            t.name.set_and_update(v, pref_update)
+            this.refresh_ui()
+        })
+
+        // a new one with the periods of this one, in one request
+        const free = this.day_types.find((o)=>!o.on.v)
+        const dup = add_btn(l1, 'Duplicate', ()=>{
+            if (free === undefined)
+                return
+            const prefs = {}
+            t.all_periods.forEach((p, i)=>{
+                const q = free.all_periods[i]
+                for (const k of ['on', 'start', 'face']) {
+                    q[k].v = p[k].v
+                    prefs[q[k].name] = q[k].v
+                }
+            })
+            free.name.v = (t.name.v + " copy").slice(0, FACE_NAME_MAX)
+            prefs[free.name.name] = free.name.v
+            free.on.v = 1
+            prefs[free.on.name] = 1
+            post_prefs(prefs, (answer)=>{
+                if (answer.unknown.length > 0 || answer.bad.length > 0)
+                    console.error("the copy of the day, not saved:", answer.unknown, answer.bad)
+            }, (err)=>{
+                window.alert("The copy of the day wasn't saved: " + err + "\nReload the page to see what is saved.")
+            })
+            this.select_type(free)
+        })
+        dup.setAttribute('title', 'a new day with the periods of this one, to change')
+        dup.setAttribute('disabled', free === undefined)
+        // not one that a day of the week is, and not the first one (the days of deleted ones go to it)
+        const used = this.week.some((w, d)=>this.day_type_of(d) === t)
+        const del = add_btn(l1, 'Delete day', ()=>{
+            if (used || t.slot == 0)
+                return
+            t.on.set_and_update(0, pref_update)
+            this.select_type(this.day_types[0])
+        })
+        del.setAttribute('disabled', used || t.slot == 0)
+        del.setAttribute('title', t.slot == 0 ? "the first day can't be deleted" :
+                                  used ? "a day of the week uses it, give that day another one in the Week first" : "")
+        if (free === undefined)
+            add_elem(l1, 'span', 'cf_note').innerText = "at most " + DAY_TYPES + " days"
+
+    }
+
+    // which day each day of the week is
+    make_week_ui(box)
+    {
+        const pref_update = this.pref_update
+        box.replaceChildren()
+        const l2 = add_div(box, 'cf_line')
+        const opts = this.used_day_types().map((o)=>({value:o.slot, text:o.name.v}))
+        WEEK_DAYS.forEach((name, d)=>{
+            const cell = add_elem(l2, 'span', 'cf_week_day')
+            add_select(cell, name + " ", opts, this.day_type_of(d).slot, (v)=>{
+                this.week[d].set_and_update(parseInt(v), pref_update)
+                this.update_time(this.display_cb)  // another period may be on now
+                this.refresh_ui()
+            })
+        })
     }
 
     // edit another period, and its face
@@ -360,6 +615,7 @@ class ClockPanel
     // the timeline and the controls of the period and the face, after something changed
     refresh_ui() {
         if (this.period_ui !== null) {
+            this.days_ui()
             this.period_ui()
             this.face_ui()
             this.timeline.update(true)
@@ -378,8 +634,15 @@ class ClockPanel
             this.update_time(display_cb)
         })
 
+        // the week: which day each day of the week is
+        const wbox = add_div(ctrl, 'cf_box')
+        add_div(wbox, 'cf_title').innerText = "Week"
+        const week_box = add_div(wbox, 'cf_week')
+
+        // a day: which one is edited, its name, new / delete, then its periods on the timeline
         const dbox = add_div(ctrl, 'cf_box')
-        add_div(dbox, 'cf_title').innerText = "The day"
+        add_div(dbox, 'cf_title').innerText = "Day"
+        const days_box = add_div(dbox, 'cf_days')
         this.timeline = new Timeline(add_div(dbox, 'cf_timeline'), this)
         const pbox = add_div(dbox, 'cf_period')
 
@@ -387,6 +650,10 @@ class ClockPanel
         add_div(fbox, 'cf_title').innerText = "Clock faces"
         const face_box = add_div(fbox, 'cf_faces')
 
+        this.days_ui = ()=>{
+            this.make_week_ui(week_box)
+            this.make_days_ui(days_box)
+        }
         this.period_ui = ()=>{ this.make_period_ui(pbox) }
         this.face_ui = ()=>{ this.make_face_ui(face_box) }
         this.refresh_ui()
@@ -492,7 +759,7 @@ class ClockPanel
             const chip = add_div(list, 'cf_face_chip')
             chip.setAttribute('selected', o === f)
             const dot = add_elem(chip, 'span', 'cf_face_dot')
-            dot.style.backgroundColor = o.css_color()
+            dot.style.background = o.css_color()
             add_elem(chip, 'span', 'cf_face_name').innerText = o.name.v
             const n = this.periods_of(o).length
             add_elem(chip, 'span', 'cf_face_uses').innerText = n == 0 ? " unused" : (n == 1 ? "" : " ×" + n)
@@ -553,16 +820,47 @@ class ClockPanel
 
         // how it shows the clock
         const l_mode = add_div(box, 'cf_line')
-        add_select(l_mode, "Mode ", [{value:FACE_NORMAL, text:"Normal"}, {value:FACE_OFF, text:"Off"}], f.mode.v, (v)=>{
+        add_select(l_mode, "Mode ", [{value:FACE_NORMAL, text:"Normal"}, {value:FACE_OFF, text:"Off"}, {value:FACE_RANDOM, text:"Random"}], f.mode.v, (v)=>{
             f.mode.set_and_update(parseInt(v), pref_update)
             show_fx_opts()
+            if (this.layouts_changed !== null)
+                this.layouts_changed()  // the layout editors, or that there's nothing to edit
             changed()
         })
         const mode_note = add_elem(l_mode, 'span', 'cf_note')
 
+        // Random: how often another face, in seconds / minutes / hours, 1 second to 24 hours
+        const l_rnd = add_div(box, 'cf_line')
+        add_elem(l_rnd, 'span', 'cf_label').innerText = "A new face every "
+        const units = [{value:1, text:"seconds"}, {value:60, text:"minutes"}, {value:3600, text:"hours"}]
+        const secs = f.rnd_int.v
+        const unit0 = [3600, 60, 1].find((u)=>secs % u == 0 && secs / u >= 1) || 1
+        const rnd_n = add_elem(l_rnd, 'input', 'cf_rnd_n')
+        rnd_n.setAttribute('type', 'number')
+        rnd_n.setAttribute('min', 1)
+        rnd_n.value = secs / unit0
+        const rnd_unit = add_select(l_rnd, null, units, unit0, ()=>{ set_interval() })
+        const set_interval = ()=>{
+            let n = parseFloat(rnd_n.value)
+            if (isNaN(n) || n <= 0)
+                n = 1
+            const v = Math.round(Math.min(RND_INTERVAL_MAX, Math.max(RND_INTERVAL_MIN, n * parseInt(rnd_unit.value))))
+            rnd_n.value = Math.round(v / parseInt(rnd_unit.value) * 1000) / 1000
+            if (v != f.rnd_int.v)
+                f.rnd_int.set_and_update(v, pref_update)
+        }
+        rnd_n.addEventListener('change', set_interval)
+        const shuffle = add_btn(l_rnd, 'Shuffle', ()=>{
+            this.shuffle()
+            if (this.layouts_changed !== null)
+                this.layouts_changed()
+            changed()
+        })
+        shuffle.setAttribute('title', 'another random face now, in the preview')
+
         // the background effect of this face
         const l3 = add_div(box, 'cf_line')
-        add_select(l3, "Background effect ", [{value:FX_NONE, text:"None"}, {value:FX_BORDER, text:"Border"}, {value:FX_SLIDE, text:"Slide"}], f.fx.v, (v)=>{
+        add_select(l3, "Background effect ", FX_LIST.map((e)=>({value:e.value, text:e.text})), f.fx.v, (v)=>{
             f.fx.set_and_update(parseInt(v), pref_update)
             show_fx_opts()
             changed()
@@ -573,10 +871,17 @@ class ClockPanel
             f.fx_color.set_and_update(c, pref_update)
             changed()
         }, {}, ColorPicker.make_hex(f.fx_color, true))
-        add_num_input(fx_opts, " Thickness ", f.fx_size.v, (v)=>{
+        const size_label = add_elem(fx_opts, 'label', 'num_in_label')  // what the size is, by the effect
+        add_num_input(fx_opts, null, f.fx_size.v, (v)=>{
             f.fx_size.set_and_update(parseInt(v), pref_update)
             changed()
-        }, {min:1, max:32})
+        }, {min:1, max:FX_SIZE_MAX})
+        const angle = add_elem(fx_opts, 'span')  // Slide only
+        add_elem(angle, 'span', 'cf_label').innerText = " Angle "
+        add_slider(angle, 'cf_angle', 0, 179, f.fx_angle.v, (v)=>{
+            f.fx_angle.set_and_update(v, pref_update)
+            changed()
+        })
         const l4 = add_div(box, 'cf_line')
         add_elem(l4, 'span', 'cf_label').innerText = "Speed "
         add_slider(l4, 'cf_speed', 1, 10, f.fx_speed.v, (v)=>{
@@ -589,23 +894,122 @@ class ClockPanel
             changed()
         }, 'outline_check')
         const show_fx_opts = ()=>{
-            const off = f.dark()
-            l3.style.display = off ? 'none' : ''
-            fx_opts.style.display = (off || f.fx.v == FX_NONE) ? 'none' : ''
-            l4.style.display = (off || f.fx.v == FX_NONE) ? 'none' : ''
-            pulse.style.display = (f.fx.v == FX_BORDER) ? '' : 'none'
-            mode_note.innerText = off ? "  nothing is lit on the panel in its periods, not even the mode icon" : ""
+            // off: nothing. random: the effect is by chance too
+            const no_fx = f.dark() || f.random()
+            l3.style.display = no_fx ? 'none' : ''
+            fx_opts.style.display = (no_fx || f.fx.v == FX_NONE) ? 'none' : ''
+            l4.style.display = (no_fx || f.fx.v == FX_NONE) ? 'none' : ''
+            const e = FX_LIST.find((e)=>e.value == f.fx.v)
+            size_label.innerText = " " + (e ? e.size : "Size") + " "
+            pulse.style.display = fx_can_pulse(f.fx.v) ? '' : 'none'
+            angle.style.display = f.fx.v == FX_SLIDE ? '' : 'none'
+            l_rnd.style.display = f.random() ? '' : 'none'
+            mode_note.innerText = f.dark() ? "  nothing is lit on the panel in its periods, not even the mode icon" :
+                                  f.random() ? "  everything about the face is by chance, the time and the date stay legible" : ""
         }
         show_fx_opts()
 
-        const l5 = add_div(box, 'cf_line')
-        add_checkbox_input(l5, "When its period starts, show the clock (also when the panel is off or in a game)", f.wake.v, (v)=>{
-            f.wake.set_and_update(v, pref_update)
+        // sounds while it's on: a sub-frame, only its checkbox while it's off
+        const snd = add_div(box, ['cf_line', 'cf_sub'])
+        add_checkbox_input(snd, "Play sounds", f.snd_on.v, (v)=>{
+            f.snd_on.set_and_update(v, pref_update)
+            show_snd()
         }, 'outline_check')
+        const snd_body = add_div(snd, 'cf_sub_body')
+        const show_snd = ()=>{
+            snd_body.style.display = f.snd_on.v ? '' : 'none'
+            snd.classList.toggle('cf_sub_closed', !f.snd_on.v)
+        }
+        show_snd()
+
+        // which sounds, a random one of them each time: picked in the list, Play to hear it, Add to the face's
+        const l_pick = add_div(snd_body, 'audio_row')
+        add_elem(l_pick, 'span', 'cf_label').innerText = "Sound "
+        const pick = add_select(l_pick, null, [{value:'', text:'loading...'}], '', ()=>{})
+        pick.classList.add('audio_sound_sel')
+        add_btn(l_pick, 'Play', ()=>{  // at the panel's volume
+            if (pick.value)
+                audio_play_now(pick.value)
+        })
+        add_btn(l_pick, 'Add', ()=>{
+            const name = pick.value
+            const cur = selected()
+            if (!name || cur.includes(name))
+                return
+            cur.push(name)
+            const text = cur.join(',')
+            if (text.length > SOUND_FILES_MAX) {
+                snd_note.innerText = "no room for more sounds, remove some first"
+                return
+            }
+            snd_note.innerText = ""
+            f.snd_files.set_and_update(text, pref_update)
+            show_selected()
+        })
+        const snd_note = add_elem(l_pick, 'span', 'cf_note')
+
+        // the face's sounds, each with a button that removes it
+        const snd_list = add_div(snd_body, 'cf_snd_list')
+        const selected = ()=>f.snd_files.v.split(',').map((s)=>s.trim()).filter((s)=>s.length > 0)
+        let on_panel = null  // the names, once they came
+        const show_selected = ()=>{
+            snd_list.replaceChildren()
+            const sel = selected()
+            if (sel.length == 0)
+                add_elem(snd_list, 'span', 'cf_note').innerText = "no sounds added yet, each time it plays a random one of them"
+            for (const name of sel) {
+                const chip = add_div(snd_list, 'cf_snd_chip')
+                const missing = on_panel !== null && !on_panel.includes(name)
+                add_elem(chip, 'span').innerText = name.replace(/\.mp3$/i, '') + (missing ? " (not on the panel)" : "")
+                const x = add_elem(chip, 'span', 'cf_snd_remove')
+                x.innerText = '×'
+                x.setAttribute('title', 'remove')
+                x.addEventListener('click', ()=>{
+                    f.snd_files.set_and_update(selected().filter((s)=>s != name).join(','), pref_update)
+                    snd_note.innerText = ""
+                    show_selected()
+                })
+            }
+        }
+        show_selected()
+        get_sounds().then((names)=>{
+            on_panel = names
+            pick.replaceChildren()
+            for (const name of names) {
+                const opt = add_elem(pick, 'option', 'combo_opt')
+                opt.value = name
+                opt.innerText = name.replace(/\.mp3$/i, '')
+            }
+            if (names.length == 0)
+                add_elem(pick, 'option', 'combo_opt').innerText = 'there are no sounds on the panel'
+            show_selected()
+        }).catch((e)=>{
+            pick.replaceChildren()
+            add_elem(pick, 'option', 'combo_opt').innerText = "couldn't get the sounds"
+            console.log("sounds:", e)
+        })
+
+        const l_every = add_div(snd_body, 'cf_line')
+        add_elem(l_every, 'span', 'cf_label').innerText = "Every "
+        add_duration_input(l_every, f.snd_every, 1, SND_TIME_MAX, pref_update)
+        const l_total = add_div(snd_body, 'cf_line')
+        add_elem(l_total, 'span', 'cf_label').innerText = "For "
+        add_duration_input(l_total, f.snd_total, 1, SND_TIME_MAX, pref_update)
+        add_elem(l_total, 'span', 'cf_note').innerText = "  from the start of its period, never past its end"
+        const l_vol = add_div(snd_body, 'cf_line')
+        add_elem(l_vol, 'span', 'cf_label').innerText = "Volume "
+        add_slider(l_vol, 'cf_speed', 0, 100, f.snd_volume.v, (v)=>{
+            f.snd_volume.set_and_update(v, pref_update)
+            vol_val.innerText = v + "%"
+        })
+        const vol_val = add_elem(l_vol, 'span', 'cf_note')
+        vol_val.innerText = f.snd_volume.v + "%"
+        add_elem(l_vol, 'span', 'cf_note').innerText = "  the panel's volume is set to it when its period starts"
 
         const n = this.periods_of(f).length
-        add_div(box, 'cf_note').innerText = "The texts of \"" + f.name.v + "\" are edited below, the preview shows it." +
-            (n > 1 ? " Changes show in all the " + n + " periods with this face." : "")
+        if (!f.random())
+            add_div(box, 'cf_note').innerText = "The texts of \"" + f.name.v + "\" are edited below, the preview shows it." +
+                (n > 1 ? " Changes show in all the " + n + " periods with this face." : "")
     }
 
     // p starts at minute m. false if another period starts then
@@ -674,7 +1078,7 @@ class Timeline
                     const seg = add_div(this.bar, 'cf_seg')
                     seg.style.left = this.pct(s)
                     seg.style.width = this.pct(l)
-                    seg.style.backgroundColor = face.css_color()
+                    seg.style.background = face.css_color()
                     seg.setAttribute('selected', p === panel.sel_period)
                     seg.setAttribute('face', face === panel.sel_face)  // the periods of the edited face
                     seg.setAttribute('title', face.name.v + "  " + minutes_str(from) + " - " + minutes_str(panel.next(p).start.v) +
@@ -800,6 +1204,12 @@ function time_generic_create(parent, pref_json, ws, PanelCls, prefixes, portrait
             else
                 layout.draw(v.gfx, v.drawers, v.tracker)
             v.gfx.finish()
+            // the clock icon, over everything like on the panel. a random face's is the edited face's
+            if (layout.icon && !(panel.hides_layout && panel.hides_layout())) {
+                const own = panel.sel_face ? panel.sel_face.layouts[i].icon : layout.icon
+                const it = layout.items.find((o)=>o.block === layout.icon)
+                it.bbox = own.draw_icon(v.canvas, v.h)
+            }
             v.canvas.draw()
             // mark the selected text
             const it = layout.selected
@@ -844,6 +1254,10 @@ function time_generic_create(parent, pref_json, ws, PanelCls, prefixes, portrait
             const label = (prev && prev.selected) ? prev.selected.label : null
             const layout = panel.layouts[i]
             views[i].ctrl.replaceChildren()
+            if (panel.layouts_editable && !panel.layouts_editable()) {
+                add_div(views[i].ctrl, 'cf_note').innerText = "A random face, made by chance: nothing to edit here. Shuffle shows another one."
+                continue  // shown_layout stays the last edited one, its selected text is selected again later
+            }
             layout.add_ui(views[i].ctrl, display, send_update, refresh)
             const same = layout.items.find((it)=>it.label == label)
             if (same !== undefined)
@@ -854,7 +1268,7 @@ function time_generic_create(parent, pref_json, ws, PanelCls, prefixes, portrait
     make_layout_ui()
     panel.layouts_changed = make_layout_ui
     for (let i = 0; i < views.length; ++i)
-        add_drag(views[i], ()=>panel.layouts[i])
+        add_drag(views[i], ()=>panel.layouts[i], ()=>!panel.layouts_editable || panel.layouts_editable())
 
     // arrow keys move the selected text of the view that's visible, shift moves by 5
     document.addEventListener('keydown', (e)=>{
@@ -883,7 +1297,8 @@ function time_generic_create(parent, pref_json, ws, PanelCls, prefixes, portrait
         section.addEventListener('section_shown', display)
 }
 
-// "Show on panel": the panel shows its clock as if it's the middle of the selected period ("SM <minute>"), with
+// "Show on panel": the panel shows its clock as if it's the middle of the selected period of the edited day type
+// ("SM <minute> <day type>"), with
 // that period's face, drawn by the panel itself. sent again when another period is selected or it moves, and
 // every SIM_RESEND_MS: the panel goes back to the real time if it doesn't hear it for a while (the page closed).
 // only when the page is from the panel, there's no panel on localhost (the py_server)
@@ -896,7 +1311,7 @@ function add_panel_mirror(parent, panel, ws)
         return
     const cont = add_div(parent, 'mirror_cont')
     let on = false
-    let sent_minute = -1, sent_at = 0
+    let sent_minute = -1, sent_type = -1, sent_at = 0
 
     const check = add_elem(cont, 'input', 'in_checkbox')
     check.setAttribute('type', 'checkbox')
@@ -914,9 +1329,10 @@ function add_panel_mirror(parent, panel, ws)
     }
     const send = ()=>{
         sent_minute = minute()
+        sent_type = panel.sel_type.slot
         sent_at = Date.now()
-        ws.send("SM " + sent_minute)
-        note.innerText = " as if it's " + minutes_str(sent_minute)
+        ws.send("SM " + sent_minute + " " + panel.sel_type.slot)
+        note.innerText = " as if it's " + minutes_str(sent_minute) + " of a " + panel.sel_type.name.v
     }
     const set_on = (v)=>{
         on = v
@@ -939,13 +1355,14 @@ function add_panel_mirror(parent, panel, ws)
             set_on(false)
             return
         }
-        if (minute() != sent_minute || Date.now() - sent_at >= SIM_RESEND_MS)
+        if (minute() != sent_minute || panel.sel_type.slot != sent_type || Date.now() - sent_at >= SIM_RESEND_MS)
             send()
     }, 300)
 }
 
-// click on the preview selects the text there, dragging moves it. get_layout() is the layout shown now
-function add_drag(view, get_layout)
+// click on the preview selects the text there, dragging moves it. get_layout() is the layout shown now,
+// editable() says if it can be changed now (a random face can't)
+function add_drag(view, get_layout, editable=()=>true)
 {
     const el = view.canvas.canvas
     // panel pixel of a mouse / touch position
@@ -956,19 +1373,24 @@ function add_drag(view, get_layout)
     let drag = null
     let layout = get_layout()
     const start = (e)=>{
+        if (!editable())
+            return false
         layout = get_layout()
         const [px, py] = to_px(e)
         const it = layout.hit(px, py)
         if (it === null)
             return false
         layout.select(it)
+        if (it.block.fixed)  // the clock icon: selected, not moved
+            return false
         drag = {sx:px, sy:py, ox:it.block.x.v, oy:it.block.y.v, moved:false}
         return true
     }
     const move = (e)=>{
         const [px, py] = to_px(e)
         if (drag === null) {
-            el.style.cursor = get_layout().hit(px, py) !== null ? 'move' : 'default'
+            const hov = editable() ? get_layout().hit(px, py) : null
+            el.style.cursor = hov === null ? 'default' : hov.block.fixed ? 'pointer' : 'move'
             return
         }
         const nx = drag.ox + px - drag.sx, ny = drag.oy + py - drag.sy

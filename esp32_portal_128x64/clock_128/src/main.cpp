@@ -37,6 +37,7 @@
 #include "TetrisGame.h"
 #include "LifeGame.h"
 #include "DustGame.h"
+#include "EffectsGame.h"
 #include "Orientation.h"
 
 
@@ -115,10 +116,12 @@ const int HID_MODES[] = { SECTION_CLOCK, SECTION_STOPW, SECTION_TIMER, SECTION_D
 #define SECTION_BTN_FIRST SECTION_CLOCK
 #define SECTION_BTN_LAST SECTION_STOPW
 
-class TopState : public PropHolder<5>
+class TopState : public PropHolder<6>
 {
 public:
     static const int MOVE_SLOW_MIN = 10, MOVE_SLOW_MAX = 20, MOVE_SLOW_STEP = 2;
+    static const int VOLUME_DEF = 30;
+    static const int VOLUME_STEP = 5;  // the remote's Volume +/- and the admin view
 
     Prop<int16_t> active_section;
     Prop<uint16_t> brightness;
@@ -126,6 +129,8 @@ public:
     Prop<int16_t> color_bits; // bits per color of the matrix, 2-6
     // the remote's movement is divided by this, in tenths: 10 is normal, 20 moves half as much. from the admin view
     Prop<int16_t> move_slow;
+    // of all the sounds, percent. the Audio tab's slider and the remote's Volume +/-
+    Prop<int16_t> volume;
     Preferences m_pref;
 
     TopState(NamesIndex* prop_map)
@@ -135,6 +140,7 @@ public:
       , gamma(this, "gamma", 10)
       , color_bits(this, "color_bits", 4)
       , move_slow(this, "move_slow", MOVE_SLOW_MIN)
+      , volume(this, "volume", VOLUME_DEF)
     {}
 
     void load() {
@@ -176,6 +182,7 @@ public:
     TetrisGame tetris;
     LifeGame life;
     DustGame dust;
+    EffectsGame effects;
     GamesState games;
     IScreen* m_cur_screen = nullptr;
 
@@ -184,7 +191,7 @@ public:
         , top(&m_prop_map)
         , timer(&m_prop_map)
         , stopw(&m_prop_map)
-        , games({&dino, &tetris, &life, &dust})
+        , games({&dino, &tetris, &life, &dust, &effects})
     {
     }
 
@@ -237,7 +244,6 @@ State* state = nullptr;
 void setupPins()
 {
   pinMode(LED_BUILTIN, OUTPUT);
-  audio_begin();
 }
 
 void setupSerial()
@@ -276,6 +282,7 @@ void setupFs()
     }
     Serial.println("FS mounted successfully");
     listAllFilesInDir("/");
+    audio_begin();  // lists the sounds
 }
 
 
@@ -416,11 +423,13 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
     }
     else if (cmd == 'S' && subcmd == 'M')
     {
-        // SM <minute>: the clock shows that minute of the day for a while ("Show on panel"), -1 stops
-        String sp[2];
+        // SM <minute> [<day type>]: the clock shows that minute of the day, of that day type, for a while
+        // ("Show on panel"), -1 stops
+        String sp[3];
         String line((char*)&v[0]);
-        if (strSplit(line, sp, 2) == 2)
-            state->clock_state.m_panel.simulate(sp[1].toInt());
+        int n = strSplit(line, sp, 3);
+        if (n >= 2)
+            state->clock_state.m_panel.simulate(sp[1].toInt(), n >= 3 ? sp[2].toInt() : 0);
     }
     else if (cmd == 'T')
     {
@@ -452,7 +461,8 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
     }
     else if (cmd == 'A')
     {
-        // the audio tab's test beep. AB <0/1>: on/off, AF <hz>: frequency, AV <percent>: volume
+        // the audio tab. AB <0/1>: the test beep on/off, AF <hz>: its frequency, AV <percent>: volume,
+        // AP <name>: play a sound of /sounds, AS 0: stop
         String sp[2];
         String line((char*)&v[0]);
         int count = strSplit(line, sp, 2);
@@ -461,12 +471,18 @@ void handleWebSocketMessage(const uint8_t *data, size_t len)
             return;
         }
         int val = sp[1].toInt();
-        if (subcmd == 'B')
+        if (subcmd == 'P')
+            audio_play(sp[1].c_str());
+        else if (subcmd == 'S')
+            audio_stop();
+        else if (subcmd == 'B')
             audio_beep(val != 0);
         else if (subcmd == 'F')
             audio_set_freq(val);
-        else if (subcmd == 'V')
-            audio_set_volume(val);
+        else if (subcmd == 'V') {  // the volume pref, like "U volume"
+            if (state->top.volume.set(constrain(val, 0, 100)))
+                g_save_at = millis() | 1;
+        }
         else
             Serial.printf("Unknown A subcmd %c\n", subcmd);
     }
@@ -597,6 +613,16 @@ void setupWeb()
 {
     setupWebSocket();
 
+    // the sounds the audio tab can play, a json array of names
+    server.on("/sounds", HTTP_GET, [](AsyncWebServerRequest *request){
+        JsonDocument doc;
+        JsonArray arr = doc.to<JsonArray>();
+        for (const String& s : audio_sounds())
+            arr.add(s);
+        String out;
+        serializeJson(doc, out);
+        request->send(200, "application/json", out);
+    });
     server.on("/heap", HTTP_GET, [](AsyncWebServerRequest *request){
         request->send(200, "text/plain", String(ESP.getFreeHeap()));
     });
@@ -620,13 +646,34 @@ void setupWeb()
     // the json of all the prefs is big, made in PSRAM so that the internal RAM is left to WiFi
     server.on("/pref", HTTP_GET, [](AsyncWebServerRequest *request){
         Serial.println("got /pref req");
+        // the json is measured and written once into a buffer of its size in PSRAM, and sent from it (freed when
+        // the request ends). it was serialized into a String that grows in small steps: when one of them failed
+        // (no memory) String dropped that part silently and the page got broken json. ~40K
         static SpiRamAllocator allocator;
         JsonDocument doc(&allocator);
         state->toJson(doc.to<JsonObject>());
-        String* out = new String();  // long, so its buffer is in PSRAM
-        serializeJson(doc, *out);
-        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", *out);
-        delete out;
+        if (doc.overflowed()) {
+            Serial.println("/pref: out of memory making the json");
+            request->send(500, "text/plain", "out of memory making the prefs json");
+            return;
+        }
+        size_t len = measureJson(doc);
+        char* buf = (char*)heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM);
+        if (buf == nullptr) {
+            Serial.printf("/pref: no memory for %u bytes\n", (unsigned)len);
+            request->send(500, "text/plain", "no memory for the prefs json");
+            return;
+        }
+        size_t written = serializeJson(doc, buf, len + 1);
+        if (written != len) {
+            Serial.printf("/pref: wrote %u of %u bytes\n", (unsigned)written, (unsigned)len);
+            heap_caps_free(buf);
+            request->send(500, "text/plain", "the prefs json didn't come out whole");
+            return;
+        }
+        Serial.printf("/pref: %u bytes\n", (unsigned)len);
+        request->onDisconnect([buf]() { heap_caps_free(buf); });
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", (const uint8_t*)buf, len);
         response->addHeader("Server","ESP Clock");
         request->send(response);
     });
@@ -942,17 +989,41 @@ bool updateTime()
 class AdminScreen : public IScreen
 {
 public:
-    void on_hid(const HidEvent& ev) {
+    // returns true if the key was taken. Back isn't when not pairing, it leaves the admin view
+    bool on_hid(const HidEvent& ev) {
+        if (ble_hid_pairing_active())
+            return on_pairing_hid(ev);
         if (ev.type != HidEvent::KEY_DOWN)
-            return; // a release is shown at the top by update()
+            return false; // a release is shown at the top by update()
         switch (ev.key) {
             case HID_KEY_UP:    m_sel = (m_sel + LINES - 1) % LINES; break;
             case HID_KEY_DOWN:  m_sel = (m_sel + 1) % LINES; break;
             case HID_KEY_LEFT:  change(-1); break;
-            case HID_KEY_RIGHT: change(1); break;
-            default: return;
+            case HID_KEY_RIGHT:
+            case HID_KEY_ENTER:
+                if (m_sel == L_PAIR) {
+                    if (!ev.repeat) {
+                        m_pair_sel = 0;
+                        ble_hid_pairing(true);
+                    }
+                }
+                else if (m_sel == L_SOUND && ev.key == HID_KEY_ENTER) {
+                    const auto& sounds = audio_sounds();
+                    if (!ev.repeat && !sounds.empty())
+                        audio_play(sounds[m_sound % sounds.size()].c_str());
+                }
+                else if (ev.key == HID_KEY_RIGHT)
+                    change(1);
+                break;
+            default: return false;
         }
         m_need_draw = true;
+        return true;
+    }
+
+    // out of the admin view
+    void leave() {
+        ble_hid_pairing(false);
     }
 
     // the WiFi and the remote change by themselves, redrawn twice a second, and when a key comes
@@ -972,6 +1043,10 @@ public:
         ble_hid_last_key(&m_drawn_keys);
         display.setDrawer(&matrix_drawer);
         display.clearDisplay();
+        if (ble_hid_pairing_active()) {
+            draw_pairing();
+            return;
+        }
         int w = display.width();
         int cols = w / CHAR_W;
         // the title and the last key from the remote, like the serial log. the key goes under it if it doesn't fit
@@ -1016,12 +1091,90 @@ public:
     }
 
 private:
-    enum { L_IP, L_SIGNAL, L_DNS, L_TZ, L_BRIGHTNESS, L_MOVE, L_REMOTE, L_IMU, LINES };
+    enum { L_IP, L_SIGNAL, L_DNS, L_TZ, L_BRIGHTNESS, L_VOLUME, L_SOUND, L_MOVE, L_REMOTE, L_PAIR, L_IMU, LINES };
     int m_sel = 0;
     bool m_need_draw = true;
     unsigned long m_last_draw = 0;
+    int m_sound = 0;  // L_SOUND: the sound picked with Left / Right, Enter plays it
 
-    static bool editable(int i) { return i == L_TZ || i == L_BRIGHTNESS || i == L_MOVE; }
+    // L_PAIR isn't a value, but it does something so it's shown like the editable ones
+    static bool editable(int i) {
+        return i == L_TZ || i == L_BRIGHTNESS || i == L_VOLUME || i == L_SOUND || i == L_MOVE || i == L_PAIR;
+    }
+
+    // ---- pairing mode: the devices found, Up/Down select one, Enter pairs with it, Back / Esc stop ----
+    static const int MAX_LISTED = 24;
+    BleFoundDevice m_found[MAX_LISTED];
+    int m_pair_sel = 0;
+
+    bool on_pairing_hid(const HidEvent& ev) {
+        if (ev.type != HidEvent::KEY_DOWN)
+            return true;
+        int n = ble_hid_found(m_found, MAX_LISTED);
+        switch (ev.key) {
+            case HID_KEY_UP:   if (m_pair_sel > 0) --m_pair_sel; break;
+            case HID_KEY_DOWN: if (m_pair_sel < n - 1) ++m_pair_sel; break;
+            case HID_KEY_ENTER:
+            case HID_KEY_RIGHT:
+                if (!ev.repeat && m_pair_sel < n)
+                    ble_hid_pair(m_found[m_pair_sel].addr);
+                break;
+            case HID_KEY_BACK:
+            case HID_KEY_ESC:
+            case HID_KEY_LEFT:
+                if (!ev.repeat)
+                    ble_hid_pairing(false);
+                break;
+        }
+        m_need_draw = true;
+        return true;  // all of it while pairing
+    }
+
+    // lines that don't fit are wrapped. returns the y after them
+    int wrapped_text(int y, const String& t, uint16_t color) {
+        int cols = display.width() / CHAR_W;
+        for (int pos = 0; pos < (int)t.length() || pos == 0; pos += cols) {
+            small_text(0, y, t.substring(pos, pos + cols), color);
+            y += LINE_H;
+        }
+        return y;
+    }
+
+    // a device's line: green connected, cyan bonded, white HID, gray the others
+    void draw_pairing() {
+        int w = display.width();
+        int cols = w / CHAR_W;
+        small_text(0, 0, "PAIRING", rgb565(255, 210, 0));
+        small_text(8 * CHAR_W, 0, "Enter:pair Back:stop", rgb565(170, 170, 190));
+        int y = LINE_H + 1;
+        y = wrapped_text(y, ble_hid_pair_status(), rgb565(120, 200, 255));
+        char hint[40];
+        snprintf(hint, sizeof(hint), "if asked type %06u Enter", (unsigned)ble_hid_passkey());
+        y = wrapped_text(y, hint, rgb565(170, 170, 190));
+        y += 2;
+
+        int n = ble_hid_found(m_found, MAX_LISTED);
+        if (n == 0) {
+            small_text(0, y, "searching...", rgb565(170, 170, 190));
+            return;
+        }
+        m_pair_sel = constrain(m_pair_sel, 0, n - 1);
+        int rows = max(1, (display.height() - y) / LINE_H);
+        int first = constrain(m_pair_sel - rows / 2, 0, max(0, n - rows));  // the selected one in view
+        for (int i = first; i < n && i < first + rows; ++i) {
+            const BleFoundDevice& d = m_found[i];
+            if (i == m_pair_sel)
+                display.fillRect(0, y - 1, w, LINE_H, rgb565(30, 40, 120));
+            String rssi = String(d.rssi);
+            String name = d.name[0] ? d.name : d.addr;
+            name = name.substring(0, max(1, cols - (int)rssi.length() - 1));
+            uint16_t c = d.connected ? rgb565(80, 255, 80) : d.bonded ? rgb565(80, 220, 255)
+                       : d.hid ? rgb565(255, 255, 255) : rgb565(140, 140, 150);
+            small_text(0, y, name, c);
+            small_text((cols - rssi.length()) * CHAR_W, y, rssi, rgb565(170, 170, 190));
+            y += LINE_H;
+        }
+    }
 
     static const int CHAR_W = 4; // the 4x6 font
     static const int LINE_H = 7;
@@ -1044,6 +1197,16 @@ private:
         else if (m_sel == L_BRIGHTNESS) {
             auto& b = state->top.brightness;
             b.set(constrain((int)b.get() + d * 16, 0, 255));
+        }
+        else if (m_sel == L_VOLUME) {
+            auto& v = state->top.volume;
+            v.set(constrain(v.get() + d * TopState::VOLUME_STEP, 0, 100));
+        }
+        else if (m_sel == L_SOUND) {
+            int n = audio_sounds().size();
+            if (n > 0)
+                m_sound = (m_sound + d + n) % n;
+            return;  // nothing to save
         }
         else if (m_sel == L_MOVE) {
             auto& m = state->top.move_slow;
@@ -1076,12 +1239,25 @@ private:
             }
             case L_BRIGHTNESS:
                 return "Brightness " + value(i, String(state->top.brightness.get()));
+            case L_VOLUME:
+                return "Volume " + value(i, String(state->top.volume.get()) + "%");
+            case L_SOUND: {
+                const auto& sounds = audio_sounds();
+                if (sounds.empty())
+                    return "Sound: none on the panel";
+                String name = sounds[m_sound % sounds.size()];
+                if (name.endsWith(".mp3"))
+                    name = name.substring(0, name.length() - 4);
+                return "Sound " + value(i, name) + (i == m_sel ? " Enter:play" : "");
+            }
             case L_MOVE: // 1.0 is normal, 2.0 moves the cursor half as much
                 return "Move sensitivity " + value(i, String(state->top.move_slow.get() / 10.0f, 1));
             case L_REMOTE: {
                 const char* d = ble_hid_device();
                 return String("Remote ") + (*d ? d : "searching");
             }
+            case L_PAIR:
+                return i == m_sel ? "Pair new device >" : "Pair new device";
             case L_IMU: {
                 if (!orientation.found())
                     return "IMU not found";
@@ -1186,6 +1362,37 @@ HidEvent scaleMove(const HidEvent& ev)
   return r;
 }
 
+// the volume indication: a speaker and a bar at the bottom middle, for a while after the volume changed
+const int VOLUME_STEP = TopState::VOLUME_STEP;
+const unsigned long VOLUME_SHOW_MS = 1500;
+const int VOLUME_BAR_W = 32;
+unsigned long g_volume_shown = 0;  // millis() when it was changed, 0 while it isn't shown
+
+void changeVolume(int d)
+{
+  int v = constrain(state->top.volume.get() + d, 0, 100);
+  if (state->top.volume.set(v))
+    g_save_at = millis() | 1;  // saved by the loop when the changes stop
+  Serial.printf("volume %d\n", v);
+  g_volume_shown = millis() | 1;
+  g_force_redraw = true;  // drawn with the mode
+}
+
+void drawVolume()
+{
+  display.setDrawer(&matrix_drawer);
+  int v = state->top.volume.get();
+  int w = MODE_ICON_SIZE + 2 + VOLUME_BAR_W + 2;
+  int x = (display.width() - w) / 2, y = display.height() - MODE_ICON_SIZE - 1;
+  display.fillRect(x - 1, y - 1, w + 2, MODE_ICON_SIZE + 2, 0);
+  display.drawBitmap(x, y, icon_speaker, MODE_ICON_SIZE, MODE_ICON_SIZE, 0xFFFF);
+  int bx = x + MODE_ICON_SIZE + 2, by = y + 1;
+  display.drawRect(bx, by, VOLUME_BAR_W, MODE_ICON_SIZE - 2, MODE_ICON_COLOR);
+  int fill = (VOLUME_BAR_W - 2) * v / 100;
+  if (fill > 0)
+    display.fillRect(bx + 1, by + 1, fill, MODE_ICON_SIZE - 4, 0x07FF);  // cyan
+}
+
 void handleHidEvent(const HidEvent& ev)
 {
   bool press = ev.type == HidEvent::KEY_DOWN && !ev.repeat;
@@ -1210,13 +1417,14 @@ void handleHidEvent(const HidEvent& ev)
     return;  // nothing else while it's off
   }
   if (g_admin) {
+    if (admin_screen.on_hid(ev)) // in pairing mode it takes Back too
+      return;
     if (press && ev.key == HID_KEY_BACK) { // out of the admin view, to the clock
+      admin_screen.leave();
       g_admin = false;
       set_section(SECTION_CLOCK);
       g_force_redraw = true;
-      return;
     }
-    admin_screen.on_hid(ev);
     return;
   }
   int section = state->top.active_section.get();
@@ -1246,6 +1454,12 @@ void handleHidEvent(const HidEvent& ev)
   }
   if (section == SECTION_TIMER && handleTimerKey(ev))
     return;
+  // Volume +/-: the volume, where the mode doesn't use them (Timer and Draw do, a game that does took them above)
+  if (ev.type == HidEvent::KEY_DOWN && (ev.key == HID_KEY_VOL_UP || ev.key == HID_KEY_VOL_DOWN) &&
+      section != SECTION_DRAW) {
+    changeVolume(ev.key == HID_KEY_VOL_UP ? VOLUME_STEP : -VOLUME_STEP);
+    return;
+  }
   if (section == SECTION_STOPW && handleStopwatchKey(ev))
     return;
   if (ev.type == HidEvent::KEY_DOWN && !ev.repeat) {
@@ -1266,7 +1480,7 @@ void drawModeIcon(int section)
   const uint8_t* icon = nullptr;
   uint16_t color = MODE_ICON_COLOR;
   switch (section) {
-    case SECTION_CLOCK: icon = icon_clock; break;
+    case SECTION_CLOCK: icon = icon_clock; color = state->clock_state.icon_color(); break;  // the face's
     case SECTION_STOPW: icon = icon_stopwatch; break;
     case SECTION_TIMER: icon = icon_timer; break;
     case SECTION_DRAW:
@@ -1322,18 +1536,23 @@ void loop(void)
     state->save();
   }
 
-  // a period whose face has "show when it starts" starts: the clock is shown, whatever was shown, also when the
-  // display was off or in a game. only when the time is known (from NTP), not when it's already on at boot
-  static int prev_wake = -2;
+  // a period starts: the clock is shown, also when the display was off. its face's mode says if it's lit (an Off
+  // face keeps the panel dark). not in a game, that isn't interrupted. only when the time is known (from NTP),
+  // not when it's already on at boot
+  static int prev_period = -2;
   if (g_epoch_time > 1600000000UL) {
-    int wp = state->clock_state.m_panel.wake_period(g_epoch_time);
-    if (wp >= 0 && wp != prev_wake && prev_wake != -2) {
-      Serial.printf("period %d starts, to the clock\n", wp);
-      g_display_off = false;
-      if (state->top.active_section.get() != SECTION_CLOCK)
-        set_section(SECTION_CLOCK);
+    int p = state->clock_state.m_panel.real_period(g_epoch_time).id;
+    if (p >= 0 && p != prev_period && prev_period != -2) {
+      if (state->top.active_section.get() == SECTION_GAMES)
+        Serial.printf("period %d starts, in a game: stays\n", p);
+      else {
+        Serial.printf("period %d starts, to the clock\n", p);
+        g_display_off = false;
+        if (state->top.active_section.get() != SECTION_CLOCK)
+          set_section(SECTION_CLOCK);
+      }
     }
-    prev_wake = wp;
+    prev_period = p;
   }
 
   int section = state->top.active_section.get();
@@ -1375,7 +1594,22 @@ void loop(void)
   matrix_drawer.setBrightness(brightness);
   matrix_drawer.setGamma(gamma);
 
+  audio_set_volume(state->top.volume.get());
+  // the volume indication goes away: the mode is drawn again without it
+  if (g_volume_shown != 0 && millis() - g_volume_shown >= VOLUME_SHOW_MS) {
+    g_volume_shown = 0;
+    section_changed = true;
+  }
+
   bool time_changed = updateTime();
+  // the sounds of the clock's face, while the clock is shown
+  // a period whose face has sounds starts: the volume it wants (the remote can change it after that)
+  int start_vol = state->clock_state.start_volume();
+  if (start_vol >= 0 && state->top.volume.set(start_vol)) {
+    Serial.printf("volume %d, the face's\n", start_vol);
+    g_save_at = millis() | 1;
+  }
+  state->clock_state.update_sound(section == SECTION_CLOCK && !g_display_off && !g_admin);
   bool timer_need_draw = state->timer.m_panel.update_time();
   bool stopw_need_draw = state->stopw.m_panel.update_time();
   bool drawtext_need_draw = state->drawtext.update();
@@ -1431,6 +1665,8 @@ void loop(void)
     // not in the admin view, and not when the clock's face is off: then nothing is lit
     if (!g_admin && !(section == SECTION_CLOCK && state->clock_state.dark()))
       drawModeIcon(section);
+    if (!g_admin && g_volume_shown != 0)
+      drawVolume();
     // finish() flushes the halo drawer, it has the kept outlined text and then flushes the matrix
     display.setDrawer(&halo_drawer);
     display.finish();

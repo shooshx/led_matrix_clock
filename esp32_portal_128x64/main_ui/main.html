@@ -12,7 +12,9 @@
 <script src="base_utils.js"></script>
 <script src="ColorPicker.js"></script>
 <script src="pixel_draw.js"></script>
+<script src="effects.js"></script>
 <script src="clock.js"></script>
+<script src="random_face.js"></script>
 <script src="prefs.js"></script>
 <script src="audio.js"></script>
 <script>
@@ -246,7 +248,7 @@ function create_ui(prefJson)
 
     // not a panel section either, opening it doesn't change what the panel shows
     const audio_e = create_section(body, 'Audio', active_section, ()=>{})
-    audio_create(audio_e, ws_wrap)
+    audio_create(audio_e, ws_wrap, prefJson)
 
     add_glob_prop_ui(body, prefJson, send_update)
 }
@@ -259,10 +261,45 @@ function try_create_ui()
     if (g_pref_json !== null && g_wasm_ready)
         create_ui(g_pref_json)
 }
-download("/pref?t=" + new Date().getTime(), (resText)=>{
-    g_pref_json = JSON.parse(resText)
-    try_create_ui()
-})
+// the prefs, asked again a few times if they don't come or don't parse (the panel was busy, the answer came
+// broken). then the error is shown on the page, with a reload button, instead of a page that stays empty
+const PREF_TRIES = 3
+function show_load_error(msg)
+{
+    console.error("prefs: " + msg)
+    const box = document.createElement('div')
+    box.className = 'load_error'
+    box.innerText = "The panel's settings couldn't be loaded: " + msg + " "
+    const btn = document.createElement('button')
+    btn.innerText = 'Reload'
+    btn.addEventListener('click', ()=>{ window.location.reload() })
+    box.appendChild(btn)
+    document.body.prepend(box)
+}
+function load_prefs(tries_left)
+{
+    const again = (msg)=>{
+        if (tries_left > 1) {
+            console.warn("prefs: " + msg + ", asking again")
+            window.setTimeout(()=>{ load_prefs(tries_left - 1) }, 1000)
+        }
+        else
+            show_load_error(msg)
+    }
+    download("/pref?t=" + new Date().getTime(), (resText)=>{
+        let json = null
+        try {
+            json = JSON.parse(resText)
+        }
+        catch (e) {
+            again("the answer isn't valid json (" + resText.length + " bytes): " + e.message)
+            return
+        }
+        g_pref_json = json
+        try_create_ui()
+    }, (msg)=>{ again(msg) })
+}
+load_prefs(PREF_TRIES)
 
 function rt_start()
 {

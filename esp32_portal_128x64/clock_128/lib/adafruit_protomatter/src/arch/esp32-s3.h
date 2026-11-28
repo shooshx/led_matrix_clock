@@ -121,6 +121,10 @@ static uint32_t _PM_directBitMask(Protomatter_core* core, int pin) {
 
 static dma_descriptor_t desc;
 static gdma_channel_handle_t dma_chan;
+// clock_128 patch: its number, for starting it with the registers in the row ISR
+static int _PM_dmaChanId = 0;
+#include <hal/gdma_ll.h>
+#include <soc/gdma_struct.h>
 
 // FIX: The row timer is started before the DMA transfer for the next
 // bitplane is kicked off, and only allows ~5 us slack for that setup
@@ -174,7 +178,13 @@ IRAM_ATTR static void blast_byte(Protomatter_core* core, uint8_t* data) {
   // Partially re-init descriptor each time (required)
   desc.dw0.size = desc.dw0.length = core->chainBits;
   desc.buffer = data;
+#if defined(ARDUINO) && ESP_IDF_VERSION_MAJOR < 5
+  // clock_128 patch: what gdma_start() does, from IRAM (it's in flash, see _PM_timerStart in esp32-common.h)
+  gdma_ll_tx_set_desc_addr(&GDMA, _PM_dmaChanId, (uint32_t)&desc);
+  gdma_ll_tx_start(&GDMA, _PM_dmaChanId);
+#else
   gdma_start(dma_chan, (intptr_t)&desc);
+#endif
   esp_rom_delay_us(1); // Necessary before starting xfer
 
   // Clear TRANS_DONE so the next row ISR can wait for this transfer to end
@@ -185,7 +195,12 @@ IRAM_ATTR static void blast_byte(Protomatter_core* core, uint8_t* data) {
 
   // Timer was cleared to 0 before calling blast_byte(), so this
   // is the state of the timer immediately after DMA started:
-#if defined(ARDUINO)
+#if defined(ARDUINO) && ESP_IDF_VERSION_MAJOR < 5
+  // clock_128 patch: timerRead() is in flash
+  uint64_t count;
+  timer_ll_get_counter_value(_PM_TIMG, _PM_TIMG_IDX, &count);
+  dmaSetupTime = (uint32_t)count;
+#elif defined(ARDUINO)
   dmaSetupTime = (uint32_t)timerRead((hw_timer_t*)core->timer);
 #elif defined(CIRCUITPY)
   uint64_t value;
@@ -296,6 +311,7 @@ static void _PM_timerInit(Protomatter_core* core) {
         .psram_trans_align = 0,
     };
     gdma_set_transfer_ability(dma_chan, &ability);
+    gdma_get_channel_id(dma_chan, &_PM_dmaChanId);  // clock_128 patch
 #if 1 // was: defined(CIRCUITPY)
   }
 #endif

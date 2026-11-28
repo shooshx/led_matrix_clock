@@ -305,13 +305,15 @@ bool Prop<int16_t>::setInt(int v) {
 
 // -----------------------------------------------
 
-// a short text, like the name of a clock face. sent from the web-ui with "UT name text", in the json as a string
-class TextProp : public IProp
+// a short text, like the name of a clock face. sent from the web-ui with "UT name text", in the json as a string.
+// MAX_LEN characters, its whole size is in a blob
+template<int MAX_LEN_>
+class TextPropN : public IProp
 {
 public:
-    static const int MAX_LEN = 16;
+    static const int MAX_LEN = MAX_LEN_;
 
-    TextProp(IPropHolder* holder, const String& name, const char* init_value)
+    TextPropN(IPropHolder* holder, const String& name, const char* init_value)
       : m_name(name), m_key(nvs_key(name))
     {
         m_value[0] = 0;
@@ -372,6 +374,7 @@ public:
     bool is_dirty() const override { return m_dirty; }
     void clear_dirty() override { m_dirty = false; }
 };
+typedef TextPropN<16> TextProp;
 
 // -----------------------------------------------
 
@@ -414,3 +417,27 @@ public:
         return true;
     }
 };
+
+// -----------------------------------------------
+
+template<>
+void Prop<int32_t>::load(Preferences& pref) {
+  m_value = pref.getInt(m_key.c_str(), m_value);
+  m_dirty = false;
+}
+
+template<>
+bool Prop<int32_t>::save(Preferences& pref) {
+  if (!m_dirty)
+      return false;
+  auto r = pref.putInt(m_key.c_str(), m_value);
+  if (r == 0)
+      Serial.printf("Failed saving int32 %s, %d=%d\n", m_name.c_str(), (int)m_value, (int)r);
+  m_dirty = false;
+  return true;
+}
+
+template<>
+bool Prop<int32_t>::setInt(int v) {
+    return set(static_cast<int32_t>(v));
+}

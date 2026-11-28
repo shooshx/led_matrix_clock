@@ -77,6 +77,12 @@ class JsonPrefHandler:
         if path == "/drawing_ver":
             self.send_bytes(handler, b"0", "text/plain")
             return True
+        # the audio tab's sounds: the converted mp3s (the panel lists its /sounds folder)
+        if path == "/sounds":
+            mp3_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sounds", "mp3")
+            names = sorted(f for f in os.listdir(mp3_dir) if f.lower().endswith(".mp3")) if os.path.isdir(mp3_dir) else []
+            self.send_bytes(handler, json.dumps(names).encode(), "application/json")
+            return True
         return False
 
     def send_bytes(self, handler, data, content_type):

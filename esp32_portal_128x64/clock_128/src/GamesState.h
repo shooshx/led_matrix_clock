@@ -95,6 +95,8 @@ public:
     virtual void tick() = 0;                  // a frame, fps() per second
     virtual int fps() const;                  // GamesState::FPS unless the game wants another rate
     virtual void on_hid(const HidEvent& ev) = 0;
+    // it uses the Volume +/- keys, else they change the volume while it's played
+    virtual bool uses_volume_keys() const { return false; }
     virtual void draw() = 0;
 };
 
@@ -125,6 +127,10 @@ public:
     // returns true if the input was taken. in the menu Up/Down aren't, they change the mode as usual
     bool on_hid(const HidEvent& ev) {
         bool press = ev.type == HidEvent::KEY_DOWN && !ev.repeat;
+        // the volume keys change the volume (not taken here), unless the game being played uses them
+        if (ev.type != HidEvent::MOVE && (ev.key == HID_KEY_VOL_UP || ev.key == HID_KEY_VOL_DOWN) &&
+            !(m_playing && !m_paused && game()->uses_volume_keys()))
+            return false;
         if (!m_playing) {
             if (!press)
                 return false;

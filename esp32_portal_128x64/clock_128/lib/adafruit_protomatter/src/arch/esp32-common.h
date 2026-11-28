@@ -66,13 +66,27 @@ IRAM_ATTR static void _PM_esp32timerCallback(void) {
   _PM_row_handler(_PM_protoPtr); // In core.c
 }
 
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
+// clock_128 patch: the timer's registers are written directly in the row ISR. arduino-esp32's timerAlarmWrite()
+// / timerAlarmEnable() / timerStart() / timerStop() and the IDF timer driver functions they call are in flash:
+// while the main code keeps the flash / PSRAM cache busy (the clock's effects) each call could stall on a cache
+// miss, the rows were lit for uneven times and the panel flickered. the same writes, from IRAM. the timer is
+// _PM_timerNum (#0), that is group 0 timer 0
+#include "hal/timer_ll.h"
+#include "soc/timer_group_struct.h"
+#define _PM_TIMG (&TIMERG0)
+#define _PM_TIMG_IDX ((timer_idx_t)0)
+#endif
+
 // Set timer period, initialize count value to zero, enable timer.
 IRAM_ATTR inline void _PM_timerStart(Protomatter_core* core, uint32_t period) {
   hw_timer_t* timer = (hw_timer_t*)core->timer;
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
-  timerAlarmWrite(timer, period, true);
-  timerAlarmEnable(timer);
-  timerStart(timer);
+  (void)timer;
+  timer_ll_set_alarm_value(_PM_TIMG, _PM_TIMG_IDX, period);
+  _PM_TIMG->hw_timer[_PM_TIMG_IDX].config.tn_autoreload = 1;
+  timer_ll_set_alarm_enable(_PM_TIMG, _PM_TIMG_IDX, true);
+  timer_ll_set_counter_enable(_PM_TIMG, _PM_TIMG_IDX, true);
 #else
   timerWrite(timer, 0);
   timerAlarm(timer, period ? period : 1, true, 0);
@@ -83,7 +97,11 @@ IRAM_ATTR inline void _PM_timerStart(Protomatter_core* core, uint32_t period) {
 // Disable timer and return current count value.
 // Timer must be previously initialized.
 IRAM_ATTR uint32_t _PM_timerStop(Protomatter_core* core) {
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
+  timer_ll_set_counter_enable(_PM_TIMG, _PM_TIMG_IDX, false);  // clock_128 patch, see _PM_timerStart
+#else
   timerStop((hw_timer_t*)core->timer);
+#endif
   return _PM_timerGetCount(core);
 }
 

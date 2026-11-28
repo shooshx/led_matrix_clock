@@ -20,6 +20,18 @@ inline uint8_t palette_step(uint8_t idx, int d) {
 const int MODE_ICON_SIZE = 8;
 const uint16_t MODE_ICON_COLOR = 0x8410; // gray
 
+// the volume indication's speaker
+const uint8_t icon_speaker[] = {
+    0b00010000,
+    0b00110010,
+    0b11110001,
+    0b11110101,
+    0b11110101,
+    0b11110001,
+    0b00110010,
+    0b00010000,
+};
+
 const uint8_t icon_clock[] = {
     0b00111100,
     0b01000010,

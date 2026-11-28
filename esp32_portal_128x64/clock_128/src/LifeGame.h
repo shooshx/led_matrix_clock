@@ -44,6 +44,7 @@ public:
     }
 
     const char* name() const override { return "Life"; }
+    bool uses_volume_keys() const override { return true; }  // the speed
     const Sprite& icon() const override { return life_art::S_ICON; }
     bool portrait() const override { return false; }
     bool any_orientation() const override { return true; }

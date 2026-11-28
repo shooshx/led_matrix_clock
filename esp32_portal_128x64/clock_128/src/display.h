@@ -70,6 +70,47 @@ public:
     void setDrawer(IDraw* drawer) {
         m_drawer = drawer;
     }
+    IDraw* drawer() const {
+        return m_drawer;
+    }
+
+    // measuring text: between measure_begin() and measure_end() printed text isn't drawn, the box of its glyphs
+    // is collected instead (the random clock faces, RandomFace.h). a glyph's box is the box of its bitmap, at
+    // the cursor like drawChar() puts it, so it holds all its pixels. the cursor moves like write() moves it.
+    // without the outline of the halo drawer, that's one more pixel around
+    void measure_begin() {
+        m_measuring = true;
+        m_mx0 = m_my0 = 0x7FFF;
+        m_mx1 = m_my1 = -0x7FFF;
+    }
+    // false if nothing would be drawn
+    bool measure_end(int16_t& x0, int16_t& y0, int16_t& x1, int16_t& y1) {
+        m_measuring = false;
+        x0 = m_mx0; y0 = m_my0; x1 = m_mx1; y1 = m_my1;
+        return m_mx1 >= m_mx0;
+    }
+
+    size_t write(uint8_t c) override {
+        if (!m_measuring)
+            return Adafruit_GFX::write(c);
+        if (c == '\n' || c == '\r')
+            return 1;  // the clock's texts are single lines
+        if (gfxFont == nullptr) {
+            // the classic font: 5x8 in a 6x8 cell
+            measure_add(cursor_x, cursor_y, cursor_x + 5 * textsize_x - 1, cursor_y + 8 * textsize_y - 1);
+            cursor_x += 6 * textsize_x;
+            return 1;
+        }
+        uint8_t first = gfxFont->first, last = gfxFont->last;
+        if (c < first || c > last)
+            return 1;
+        const GFXglyph& g = gfxFont->glyph[c - first];
+        if (g.width > 0 && g.height > 0)
+            measure_add(cursor_x + g.xOffset * textsize_x, cursor_y + g.yOffset * textsize_y,
+                        cursor_x + (g.xOffset + g.width) * textsize_x - 1, cursor_y + (g.yOffset + g.height) * textsize_y - 1);
+        cursor_x += g.xAdvance * (int16_t)textsize_x;
+        return 1;
+    }
 
     // x position of the cursor after printing the string from x=0
     // (the old project had this as an extra x_after output of getTextBounds())
@@ -84,6 +125,15 @@ public:
 
 private:
     IDraw* m_drawer = nullptr;
+    bool m_measuring = false;
+    int16_t m_mx0 = 0, m_my0 = 0, m_mx1 = 0, m_my1 = 0;
+
+    void measure_add(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+        m_mx0 = min(m_mx0, x0);
+        m_my0 = min(m_my0, y0);
+        m_mx1 = max(m_mx1, x1);
+        m_my1 = max(m_my1, y1);
+    }
 };
 
 // IDraw on top of the Protomatter matrix.
